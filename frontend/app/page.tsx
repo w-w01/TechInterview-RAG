@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -34,7 +34,6 @@ type GenerateResponse = {
   topic: string;
   difficulty: string;
   expected_key_points: string[];
-  reference_snippets: ReferenceSnippet[];
 };
 
 type EvaluateResponse = {
@@ -60,6 +59,12 @@ export default function Home() {
   const [loadingGen, setLoadingGen] = useState(false);
   const [loadingEval, setLoadingEval] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 引用证据区块默认展开，可用受控 details 收起
+  const [evidenceOpen, setEvidenceOpen] = useState(true);
+
+  useEffect(() => {
+    if (evaluation) setEvidenceOpen(true);
+  }, [evaluation]);
 
   const onGenerate = useCallback(async () => {
     setError(null);
@@ -219,25 +224,6 @@ export default function Home() {
 
             <Card>
               <CardHeader>
-                <CardTitle>参考片段</CardTitle>
-                <CardDescription>来自本地种子与向量检索的相关条目。</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {questionPayload.reference_snippets.map((s, i) => (
-                  <div key={`${s.source}-${i}`} className="space-y-1">
-                    <p className="text-xs font-medium text-muted-foreground">
-                      {s.source}
-                    </p>
-                    <pre className="whitespace-pre-wrap rounded-md border bg-card p-3 text-xs leading-relaxed">
-                      {s.content}
-                    </pre>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
                 <CardTitle>你的答案</CardTitle>
                 <CardDescription>尽量结构化回答，便于评分。</CardDescription>
               </CardHeader>
@@ -297,17 +283,25 @@ export default function Home() {
                 </p>
               </div>
               <Separator />
-              <div className="space-y-3">
-                <p className="text-sm font-medium">引用证据</p>
-                {evaluation.reference_evidence.map((s, i) => (
-                  <div key={`ev-${i}`} className="space-y-1">
-                    <p className="text-xs text-muted-foreground">{s.source}</p>
-                    <pre className="whitespace-pre-wrap rounded-md border bg-muted/50 p-3 text-xs leading-relaxed">
-                      {s.content}
-                    </pre>
-                  </div>
-                ))}
-              </div>
+              <details
+                className="rounded-lg border border-border bg-card/30 [&_summary::-webkit-details-marker]:hidden"
+                open={evidenceOpen}
+                onToggle={(e) => setEvidenceOpen(e.currentTarget.open)}
+              >
+                <summary className="cursor-pointer select-none list-none px-3 py-2.5 text-sm font-medium text-foreground hover:bg-muted/50">
+                  引用证据（点击展开或收起）
+                </summary>
+                <div className="space-y-3 border-t px-3 py-3">
+                  {evaluation.reference_evidence.map((s, i) => (
+                    <div key={`ev-${i}`} className="space-y-2">
+                      <p className="text-xs text-muted-foreground">{s.source}</p>
+                      <pre className="whitespace-pre-wrap rounded-md border bg-muted/50 p-3 text-xs leading-relaxed">
+                        {s.content}
+                      </pre>
+                    </div>
+                  ))}
+                </div>
+              </details>
             </CardContent>
           </Card>
         )}

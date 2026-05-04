@@ -102,27 +102,14 @@ async def generate_question(body: GenerateQuestionRequest) -> GenerateQuestionRe
         kps = [str(kps)]
     kps = [str(x) for x in kps]
 
-    # 附加检索：与当前题语义相近的条目作为参考片段
-    qtext = str(picked.get("question", ""))
-    neighbors = await rag.retrieve(query_text=qtext, topic=body.topic, top_k=4)
-    snippets: List[ReferenceSnippet] = [_snippet_from_item(picked)]
-    seen = {str(picked.get("id"))}
-    for it in neighbors:
-        iid = str(it.get("id", ""))
-        if iid in seen:
-            continue
-        seen.add(iid)
-        snippets.append(_snippet_from_item(it))
-        if len(snippets) >= 4:
-            break
-
+    # 出题阶段仅随机抽题，不做向量检索；参考片段字段保持空列表以兼容 API 形态
     return GenerateQuestionResponse(
         question_id=str(picked.get("id", "")),
         question=str(picked.get("question", "")),
         topic=body.topic,
         difficulty=body.difficulty,
         expected_key_points=kps,
-        reference_snippets=snippets,
+        reference_snippets=[],
     )
 
 
