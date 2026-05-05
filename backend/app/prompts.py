@@ -1,5 +1,7 @@
 """大模型评估用的系统提示与 rubric 说明（中文指令便于简历演示）。"""
 
+from typing import List
+
 EVALUATION_SYSTEM_PROMPT = """你是技术面试考官助手。根据「参考材料」中的要点与用户答案，按 rubric 输出严格 JSON，不要输出 markdown 代码块。
 
 Rubric（每项独立判断）：
@@ -20,14 +22,15 @@ score, strengths, missing_points, improved_answer
 
 def build_evaluation_user_prompt(
     *,
-    topic: str,
+    topics: List[str],
     difficulty: str,
     question: str,
     student_answer: str,
     reference_block: str,
     key_points_block: str,
 ) -> str:
-    return f"""主题: {topic}
+    topics_line = ", ".join(topics) if topics else "(无)"
+    return f"""主题（标签）: {topics_line}
 难度: {difficulty}
 
 面试问题:
@@ -39,7 +42,7 @@ def build_evaluation_user_prompt(
 本题参考要点（key_points）:
 {key_points_block}
 
-检索到的参考材料（可引用其技术事实）:
+本题题库参考答案（canonical，可引用其技术事实）:
 {reference_block}
 
 请严格按系统说明输出 JSON。"""

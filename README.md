@@ -1,40 +1,49 @@
 # InterviewMate RAG
 
-面向简历演示的**本地 RAG 面试练习 MVP**：FastAPI + Next.js，出题来自小规模结构化题库，评卷时用 **Embedding + FAISS** 检索参考条目，并用大模型输出 **0–10 分** 与结构化反馈（亮点、缺失、改进回答、引用证据）。
+面向简历演示的**本地题库面试练习 MVP**：FastAPI + Next.js，出题来自小规模结构化 JSON 题库；评卷时仅用 **`question_id` 锚定的本题** 参考答案与要点写入 prompt，由大模型按 **LLM rubric** 输出 **0–10 分** 与结构化反馈（亮点、缺失、改进回答、本题引用证据）。
+
+**当前已实现**：按标签 OR + 难度 **纯随机** 抽题（`/generate-question`）；**评卷不做向量检索**，不向评卷 prompt 合并邻居条目。
+
+**规划中的 JD MVP**（文档已与方案对齐，**代码落地前接口不可用**）：用户 **粘贴 JD 纯文本**，后端对题库条目做 **Embedding**，用 JD 向量在指定难度子集中 **相似度排序组卷**（`POST /generate-paper-from-jd`）；**评卷仍仅为本题 + LLM rubric**，不把 JD 或检索邻居写入评卷。详见 [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md)。
 
 ## 项目叙事（可写进简历）
 
-- **端到端**：前后端分离单页流程；出题随机抽题（不按向量检索选题）；评卷时用 **`question_id` 锚定当前题**，避免「检索到的第一片段不一定是本题」的可解释性问题，再结合向量近邻扩充上下文。
-- **工程拆分**：`schemas`（Pydantic）、`rag`（嵌入与 FAISS）、`prompts`（rubric + JSON 输出）、`main`（路由与校验）。
+- **端到端**：前后端分离单页流程；**评卷路径**不调用向量检索，上下文 **仅本题**，可解释性固定。
+- **选题**：已实现 topic 随机池；规划 JD-conditioned **检索组卷**（与随机池并存）。
+- **工程拆分**：`schemas`（Pydantic）、`rag`（题库与选题）、`prompts`（rubric + JSON 输出）、`main`（路由与校验）；JD 组卷实现后将增加题库向量索引构建与 JD 查询嵌入（仍在后端内聚）。
 - **刻意不做**：账号体系、生产数据库、部署流水线（见 `docs/MVP_SCOPE.md`）。
 
 ## 数据与题库格式
 
-- 默认使用仓库内 **`backend/data/interview_qa_seed.json`**（小规模 curated 条目；字段含 `id`、`topic`、`difficulty`、`question`、`answer`、`key_points`、`tags`、`source`）。
-- 若使用 **Kaggle「Software Engineering Interview Questions」类数据集**（常见列为 `question_id`、`q`、`a`、`category`、`difficulty`）：**通常可直接用于本项目**，前提是：
-  - **遵守该数据集在 Kaggle 上的 License**（商用与二次分发前务必自行核对条款）。
-  - **映射到你的 schema**：例如 `question_id`→`id`，`q`→`question`，`a`→`answer`；`category`→本项目的 `topic`（需对齐枚举：`Java` / `SQL` / `REST API` / `System Design` / `AI / RAG Basics`）；`difficulty`→`beginner` / `intermediate` / `advanced`（若原始标签不同则建一层映射表）。
-  - **`key_points`**：若源数据没有该列，可先置空数组 `[]`，或后续用脚本从 `answer` 抽取要点。
-- 替换种子文件后重启后端即可重建向量索引（无需改代码，只要 JSON 数组形状一致）。
+- **权威说明**见 [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md)。
+- 题库 **`backend/data/interview_qa_seed.json`**（约 200 条）与白名单 **`topic_allowlist.json`** 由脚本从 **`backend/data/kaggle-Software_Engineering_Interview_Questions_Dataset.json`** 生成；遵守该数据集在 Kaggle 上的 License。
+- 重新生成：
+
+```powershell
+cd backend
+python scripts\etl_kaggle_to_seed.py
+```
+
+- 前端通过 **`GET /topics`** 拉取可选标签；出题请求为 **`topics` 数组（OR：与题目标签有交集即入池）**。
 
 ## 技术栈
 
-- **后端**：FastAPI、Pydantic、OpenAI API（Embedding + Chat）、FAISS、本地 JSON 题库。
+- **后端**：FastAPI、Pydantic、OpenAI API（Chat Completions 用于评卷；**规划**中对种子批量 Embedding 用于 JD 组卷）、本地 JSON 题库。
 - **前端**：Next.js（App Router）、React、TypeScript、Tailwind CSS、shadcn/ui。
 
 ## 仓库结构
 
 ```
-backend/          FastAPI、data/interview_qa_seed.json
+backend/          FastAPI、data/（种子与白名单、Kaggle 源 JSON）、scripts/etl_kaggle_to_seed.py
 frontend/         Next.js 单页
-docs/             MVP 范围与 RAG 设计说明
+docs/             MVP、题库与评卷设计、DATA_SCHEMA
 ```
 
 ## 环境准备
 
 1. **Python 3.11+**（建议）
 2. **Node.js 20+** 与 npm
-3. **OpenAI API Key**（必填：启动建索引与评卷均会调用 API）
+3. **OpenAI API Key**（必填：**评卷** Chat；**JD 组卷功能实现后**还将在启动时对全库条目调用 Embedding）
 
 ## 后端：安装与运行
 
@@ -48,9 +57,8 @@ copy .env.example .env
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
-健康检查：<http://127.0.0.1:8000/health>
-
-> 注意：首次启动会对全部题库条目调用 Embedding 建 FAISS 索引，需要外网与有效 Key。
+- 健康检查：<http://127.0.0.1:8000/health>（`rag_index_ready`：题库已加载且非空。**规划**中增加 `embedding_index_ready`：JD 组卷用向量索引是否已构建。）
+- Topic 列表：<http://127.0.0.1:8000/topics>
 
 ## 前端：安装与运行
 
@@ -66,16 +74,35 @@ npm run dev
 
 ## 示例 API
 
-**生成题目**
+**生成题目（已实现：topic 随机池）**
 
 ```http
 POST http://127.0.0.1:8000/generate-question
 Content-Type: application/json
 
-{"topic": "Java", "difficulty": "beginner"}
+{"topics": ["data_structures"], "difficulty": "beginner"}
 ```
 
-响应中的 **`question_id`** 须在评卷时原样带回。
+多选示例：`{"topics": ["devops", "system_design"], "difficulty": "intermediate"}`（池内为「标签任一为 devops 或 system_design」且难度匹配的题）。合法 slug 以 **`GET /topics`** 为准。
+
+响应含 **`question_id`**、`topics`（本题全部标签）；评卷时带回 **`question_id`**，且 **`topics` 须与本题标签有交集**（一般用出题时的筛选标签）。
+
+**根据 JD 组卷（规划中，尚未实现）**
+
+```http
+POST http://127.0.0.1:8000/generate-paper-from-jd
+Content-Type: application/json
+
+{
+  "jd_text": "粘贴的职位描述纯文本……",
+  "difficulty": "intermediate",
+  "count": 5
+}
+```
+
+- **输入**：`jd_text` 为用户粘贴的 JD；服务端将校验长度并对过长文本截断（具体上限以实现为准）。
+- **输出**：`questions` 数组，元素字段与 **`/generate-question` 单次响应** 对齐，便于前端选题后沿用 **`/evaluate-answer`**。
+- **难度**：与现有 `beginner` / `intermediate` / `advanced` 一致；仅在对应难度的种子子集中做向量相似度排序并取 Top‑N（去重）。
 
 **评估答案**
 
@@ -84,18 +111,21 @@ POST http://127.0.0.1:8000/evaluate-answer
 Content-Type: application/json
 
 {
-  "question_id": "java_001",
-  "question": "Java 中 interface 与 abstract class 的主要区别是什么？",
-  "student_answer": "interface 只能有抽象方法……",
-  "topic": "Java",
+  "question_id": "q_11",
+  "question": "What is the difference between an array and a linked list?",
+  "student_answer": "Array is fixed size, linked list uses nodes...",
+  "topics": ["data_structures"],
   "difficulty": "beginner"
 }
 ```
 
+响应中的 **`reference_evidence`** 仅为 **本题** 对应片段（无近邻扩充）；**JD 组卷不改变评卷逻辑**。
+
 ## 文档
 
 - [docs/MVP_SCOPE.md](docs/MVP_SCOPE.md) — 目标、范围、非目标、局限
-- [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md) — 数据加载、检索、`question_id` 锚定、评卷与引用
+- [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md) — 数据加载、随机选题、JD RAG 组卷（规划）、`question_id` 锚定评卷与引用
+- [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) — 题库 JSON 字段与白名单
 
 ## 截图
 

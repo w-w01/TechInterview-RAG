@@ -1,0 +1,88 @@
+{
+  "topics": [
+    {
+      "slug": "algorithms",
+      "label": "Algorithms"
+    },
+    {
+      "slug": "artificial_intelligence",
+      "label": "Artificial Intelligence"
+    },
+    {
+      "slug": "back_end",
+      "label": "Back-End"
+    },
+    {
+      "slug": "data_engineering",
+      "label": "Data Engineering"
+    },
+    {
+      "slug": "data_structures",
+      "label": "Data Structures"
+    },
+    {
+      "slug": "database_and_sql",
+      "label": "Database and SQL"
+    },
+    {
+      "slug": "database_systems",
+      "label": "Database Systems"
+    },
+    {
+      "slug": "devops",
+      "label": "DevOps"
+    },
+    {
+      "slug": "distributed_systems",
+      "label": "Distributed Systems"
+    },
+    {
+      "slug": "front_end",
+      "label": "Front-End"
+    },
+    {
+      "slug": "full_stack",
+      "label": "Full-Stack"
+    },
+    {
+      "slug": "general_programming",
+      "label": "General Programming"
+    },
+    {
+      "slug": "languages_and_frameworks",
+      "label": "Languages and Frameworks"
+    },
+    {
+      "slug": "low_level_systems",
+      "label": "Low-Level Systems"
+    },
+    {
+      "slug": "machine_learning",
+      "label": "Machine Learning"
+    },
+    {
+      "slug": "networking",
+      "label": "Networking"
+    },
+    {
+      "slug": "security",
+      "label": "Security"
+    },
+    {
+      "slug": "software_testing",
+      "label": "Software Testing"
+    },
+    {
+      "slug": "system_design",
+      "label": "System Design"
+    },
+    {
+      "slug": "version_control",
+      "label": "Version Control"
+    },
+    {
+      "slug": "web_development",
+      "label": "Web Development"
+    }
+  ]
+}

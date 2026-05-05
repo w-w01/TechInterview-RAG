@@ -13,25 +13,18 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 
-const TOPICS = [
-  "Java",
-  "SQL",
-  "REST API",
-  "System Design",
-  "AI / RAG Basics",
-] as const;
-
 const DIFFICULTIES = ["beginner", "intermediate", "advanced"] as const;
 
-type Topic = (typeof TOPICS)[number];
 type Difficulty = (typeof DIFFICULTIES)[number];
+
+type TopicOption = { slug: string; label: string };
 
 type ReferenceSnippet = { source: string; content: string };
 
 type GenerateResponse = {
   question_id: string;
   question: string;
-  topic: string;
+  topics: string[];
   difficulty: string;
   expected_key_points: string[];
 };
@@ -49,7 +42,13 @@ function apiBase(): string {
 }
 
 export default function Home() {
-  const [topic, setTopic] = useState<Topic>("Java");
+  const [topicOptions, setTopicOptions] = useState<TopicOption[]>([]);
+  // 默认 slug 须存在于题库白名单；与 seeds 中 general_programming 一致（首轮 GET /topics 后会再次校正）
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([
+    "general_programming",
+  ]);
+  /** 最近一次「生成题目」成功时使用的筛选标签，评卷时必须一致以防交集校验失败 */
+  const [sessionTopics, setSessionTopics] = useState<string[]>([]);
   const [difficulty, setDifficulty] = useState<Difficulty>("beginner");
   const [questionPayload, setQuestionPayload] = useState<GenerateResponse | null>(
     null,
@@ -59,12 +58,51 @@ export default function Home() {
   const [loadingGen, setLoadingGen] = useState(false);
   const [loadingEval, setLoadingEval] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // 引用证据区块默认展开，可用受控 details 收起
   const [evidenceOpen, setEvidenceOpen] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${apiBase()}/topics`);
+        if (!res.ok) return;
+        const data = (await res.json()) as { topics: TopicOption[] };
+        if (cancelled || !data.topics?.length) return;
+        setTopicOptions(data.topics);
+        setSelectedTopics((prev) => {
+          const valid = prev.filter((s) =>
+            data.topics.some((t) => t.slug === s),
+          );
+          return valid.length ? valid : [data.topics[0].slug];
+        });
+      } catch {
+        /* 忽略，保留默认 java */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (evaluation) setEvidenceOpen(true);
   }, [evaluation]);
+
+  const labelForSlug = useCallback(
+    (slug: string) =>
+      topicOptions.find((t) => t.slug === slug)?.label ?? slug,
+    [topicOptions],
+  );
+
+  const toggleTopic = useCallback((slug: string) => {
+    setSelectedTopics((prev) => {
+      if (prev.includes(slug)) {
+        const next = prev.filter((s) => s !== slug);
+        return next.length ? next : prev;
+      }
+      return [...prev, slug];
+    });
+  }, []);
 
   const onGenerate = useCallback(async () => {
     setError(null);
@@ -74,7 +112,7 @@ export default function Home() {
       const res = await fetch(`${apiBase()}/generate-question`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ topic, difficulty }),
+        body: JSON.stringify({ topics: selectedTopics, difficulty }),
       });
       if (!res.ok) {
         const text = await res.text();
@@ -82,14 +120,16 @@ export default function Home() {
       }
       const data = (await res.json()) as GenerateResponse;
       setQuestionPayload(data);
+      setSessionTopics([...selectedTopics]);
       setAnswer("");
     } catch (e) {
       setQuestionPayload(null);
+      setSessionTopics([]);
       setError(e instanceof Error ? e.message : "Generate failed");
     } finally {
       setLoadingGen(false);
     }
-  }, [topic, difficulty]);
+  }, [selectedTopics, difficulty]);
 
   const onEvaluate = useCallback(async () => {
     if (!questionPayload) {
@@ -98,6 +138,10 @@ export default function Home() {
     }
     if (!answer.trim()) {
       setError("请先填写你的答案。");
+      return;
+    }
+    if (sessionTopics.length === 0) {
+      setError("评卷缺少出题时的标签上下文，请重新生成题目。");
       return;
     }
     setError(null);
@@ -110,7 +154,7 @@ export default function Home() {
           question_id: questionPayload.question_id,
           question: questionPayload.question,
           student_answer: answer,
-          topic: questionPayload.topic,
+          topics: sessionTopics,
           difficulty: questionPayload.difficulty,
         }),
       });
@@ -126,7 +170,7 @@ export default function Home() {
     } finally {
       setLoadingEval(false);
     }
-  }, [answer, questionPayload]);
+  }, [answer, questionPayload, sessionTopics]);
 
   const selectClass =
     "flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
@@ -139,56 +183,64 @@ export default function Home() {
             InterviewMate RAG
           </h1>
           <p className="text-sm text-muted-foreground">
-            本地演示：选题与难度、生成面试题、提交答案后获得评分与改进建议。
+            本地演示：可多选标签（OR）与难度、生成面试题、提交答案后获得评分与改进建议。
           </p>
         </header>
 
         <Card>
           <CardHeader>
             <CardTitle>练习设置</CardTitle>
-            <CardDescription>选择主题与难度，然后生成题目。</CardDescription>
+            <CardDescription>
+              勾选至少一个主题标签（与题库条目的 topics 求交集后随机抽题），再选难度并生成。
+            </CardDescription>
           </CardHeader>
-          <CardContent className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+          <CardContent className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="topic">主题</Label>
-              <select
-                id="topic"
-                className={selectClass}
-                value={topic}
-                onChange={(e) => setTopic(e.target.value as Topic)}
-              >
-                {TOPICS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
+              <Label>主题标签（多选）</Label>
+              <div className="flex flex-wrap gap-3">
+                {topicOptions.map((opt) => (
+                  <label
+                    key={opt.slug}
+                    className="flex cursor-pointer items-center gap-2 text-sm"
+                  >
+                    <input
+                      type="checkbox"
+                      className="size-4 rounded border-input"
+                      checked={selectedTopics.includes(opt.slug)}
+                      onChange={() => toggleTopic(opt.slug)}
+                    />
+                    <span>{opt.label}</span>
+                  </label>
                 ))}
-              </select>
+              </div>
             </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="difficulty">难度</Label>
-              <select
-                id="difficulty"
-                className={selectClass}
-                value={difficulty}
-                onChange={(e) =>
-                  setDifficulty(e.target.value as Difficulty)
-                }
+            <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="difficulty">难度</Label>
+                <select
+                  id="difficulty"
+                  className={selectClass}
+                  value={difficulty}
+                  onChange={(e) =>
+                    setDifficulty(e.target.value as Difficulty)
+                  }
+                >
+                  {DIFFICULTIES.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <Button
+                type="button"
+                onClick={onGenerate}
+                disabled={loadingGen || selectedTopics.length === 0}
+                className="sm:ml-2"
               >
-                {DIFFICULTIES.map((d) => (
-                  <option key={d} value={d}>
-                    {d}
-                  </option>
-                ))}
-              </select>
+                {loadingGen ? "生成中..." : "生成题目"}
+              </Button>
             </div>
-            <Button
-              type="button"
-              onClick={onGenerate}
-              disabled={loadingGen}
-              className="sm:ml-2"
-            >
-              {loadingGen ? "生成中..." : "生成题目"}
-            </Button>
           </CardContent>
         </Card>
 
@@ -198,28 +250,14 @@ export default function Home() {
               <CardHeader>
                 <CardTitle>面试题</CardTitle>
                 <CardDescription>
-                  {questionPayload.topic} / {questionPayload.difficulty} /{" "}
-                  {questionPayload.question_id}
+                  {questionPayload.topics.map(labelForSlug).join(" · ")} /{" "}
+                  {questionPayload.difficulty} / {questionPayload.question_id}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm leading-relaxed">
                   {questionPayload.question}
                 </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>期望要点</CardTitle>
-                <CardDescription>对照这些关键点组织你的回答。</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ul className="list-disc space-y-1 pl-5 text-sm">
-                  {questionPayload.expected_key_points.map((p) => (
-                    <li key={p}>{p}</li>
-                  ))}
-                </ul>
               </CardContent>
             </Card>
 
@@ -247,13 +285,24 @@ export default function Home() {
           </>
         )}
 
-        {evaluation && (
+        {evaluation && questionPayload && (
           <Card>
             <CardHeader>
               <CardTitle>评估结果</CardTitle>
-              <CardDescription>评分与改进建议（来自大模型结构化输出）。</CardDescription>
+              <CardDescription>
+                提交后展示题库期望要点与模型评分（作答前不展示要点）。
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="space-y-2">
+                <p className="text-sm font-medium">期望要点（题库）</p>
+                <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                  {questionPayload.expected_key_points.map((p) => (
+                    <li key={p}>{p}</li>
+                  ))}
+                </ul>
+              </div>
+              <Separator />
               <div>
                 <p className="text-sm text-muted-foreground">分数（满分 10）</p>
                 <p className="text-3xl font-semibold tabular-nums">

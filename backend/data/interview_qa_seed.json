@@ -1,41 +1,3383 @@
 [
-  {"id": "java_001", "topic": "Java", "difficulty": "beginner", "question": "Java 中 interface 与 abstract class 的主要区别是什么？", "answer": "interface 在 Java 8+ 可有 default/static 方法，主要约定能力契约，支持多实现；abstract class 可有状态字段与构造器，单继承，更适合共享实现与模板方法。", "key_points": ["多实现 vs 单继承", "字段与构造器", "默认方法历史", "使用场景"], "tags": ["java", "oop"], "source": "manually curated seed data"},
-  {"id": "java_002", "topic": "Java", "difficulty": "beginner", "question": "== 与 equals 有何区别？", "answer": "== 比较引用或基本类型值；equals 是 Object 方法，可被重写以实现值语义（如 String 比较字符内容）。", "key_points": ["引用相等", "值相等", "可重写 equals", "hashCode 契约"], "tags": ["java", "basics"], "source": "manually curated seed data"},
-  {"id": "java_003", "topic": "Java", "difficulty": "beginner", "question": "String、StringBuilder、StringBuffer 分别适合什么场景？", "answer": "String 不可变，适合常量与共享；StringBuilder 可变非同步，拼接性能高；StringBuffer 可变同步，多线程安全但开销更大。", "key_points": ["不可变", "线程安全", "拼接性能"], "tags": ["java", "string"], "source": "manually curated seed data"},
-  {"id": "java_004", "topic": "Java", "difficulty": "intermediate", "question": "简述 Java 内存模型中 volatile 的语义。", "answer": "volatile 保证可见性与有序性（禁止某些重排序），但不保证复合操作的原子性；常用于状态标志与双重检查锁的单例模式。", "key_points": ["可见性", "有序性", "非原子复合操作"], "tags": ["java", "concurrency"], "source": "manually curated seed data"},
-  {"id": "java_005", "topic": "Java", "difficulty": "intermediate", "question": "HashMap 在 JDK 8 中链表过长时如何优化？", "answer": "当桶内元素超过阈值且 key 可比较时，链表可转为红黑树，将最坏查找从 O(n) 降到 O(log n)，同时保留扩容与 rehash 机制。", "key_points": ["链表转树", "阈值", "扩容"], "tags": ["java", "collections"], "source": "manually curated seed data"},
-  {"id": "java_006", "topic": "Java", "difficulty": "intermediate", "question": "什么是 happens-before？举例说明。", "answer": "JMM 定义的程序顺序规则、volatile 写读、锁释放获取、线程 start/join 等关系；若 A happens-before B，则 A 的结果对 B 可见。", "key_points": ["JMM", "可见性传递", "同步规则"], "tags": ["java", "jmm"], "source": "manually curated seed data"},
-  {"id": "java_007", "topic": "Java", "difficulty": "advanced", "question": "如何诊断与缓解 Java 应用的 GC 停顿过长问题？", "answer": "收集 GC 日志与指标，分析分配速率、晋升失败、Full GC 触发原因；调优堆大小、新生代比例、选择合适收集器（如 G1/ZGC），并减少大对象与内存泄漏。", "key_points": ["GC 日志", "分配/晋升", "收集器选择", "代码层优化"], "tags": ["java", "gc"], "source": "manually curated seed data"},
-  {"id": "java_008", "topic": "Java", "difficulty": "advanced", "question": "谈谈 CompletableFuture 相比传统线程池回调的优势。", "answer": "可组合异步流水线（thenApply/handle/allOf），统一异常传播与线程切换，代码更接近声明式，减少嵌套回调地狱。", "key_points": ["组合", "异常处理", "异步流水线"], "tags": ["java", "async"], "source": "manually curated seed data"},
-  {"id": "sql_001", "topic": "SQL", "difficulty": "beginner", "question": "INNER JOIN 与 LEFT JOIN 的区别？", "answer": "INNER JOIN 只保留两表匹配行；LEFT JOIN 保留左表全部行，右表无匹配时补 NULL。", "key_points": ["匹配语义", "NULL 填充", "结果集大小"], "tags": ["sql", "join"], "source": "manually curated seed data"},
-  {"id": "sql_002", "topic": "SQL", "difficulty": "beginner", "question": "PRIMARY KEY 与 UNIQUE 约束有何不同？", "answer": "主键非空且唯一，每表通常一个；UNIQUE 允许多个、可包含 NULL（视数据库实现），主键常作聚簇索引依据。", "key_points": ["非空", "数量", "索引含义"], "tags": ["sql", "constraints"], "source": "manually curated seed data"},
-  {"id": "sql_003", "topic": "SQL", "difficulty": "beginner", "question": "什么是事务的 ACID？", "answer": "Atomicity 原子性、Consistency 一致性、Isolation 隔离性、Durability 持久性；共同保证可靠数据库操作。", "key_points": ["四要素解释", "隔离级别相关"], "tags": ["sql", "transaction"], "source": "manually curated seed data"},
-  {"id": "sql_004", "topic": "SQL", "difficulty": "intermediate", "question": "解释脏读、不可重复读、幻读。", "answer": "脏读读到未提交数据；不可重复读同一行两次结果不同；幻读范围查询两次行数不同。隔离级别可缓解但各有代价。", "key_points": ["三种现象", "隔离级别"], "tags": ["sql", "isolation"], "source": "manually curated seed data"},
-  {"id": "sql_005", "topic": "SQL", "difficulty": "intermediate", "question": "如何为慢查询建立合适索引？", "answer": "用执行计划看访问类型，优先高选择性列，注意最左前缀；避免过多索引写放大；考虑覆盖索引与排序字段。", "key_points": ["EXPLAIN", "选择性", "最左前缀", "写放大"], "tags": ["sql", "index"], "source": "manually curated seed data"},
-  {"id": "sql_006", "topic": "SQL", "difficulty": "intermediate", "question": "什么是规范化与反规范化？各适用场景？", "answer": "规范化减少冗余与异常更新；反规范化为读性能做冗余或预聚合；OLTP 偏规范，OLAP/报表常反规范。", "key_points": ["冗余", "更新异常", "读写权衡"], "tags": ["sql", "design"], "source": "manually curated seed data"},
-  {"id": "sql_007", "topic": "SQL", "difficulty": "advanced", "question": "如何设计分库分表下的全局唯一 ID？", "answer": "雪花算法、号段模式、UUID/ULID、数据库序列代理等；需考虑时钟回拨、热点分段与可观测性。", "key_points": ["趋势递增", "时钟回拨", "热点"], "tags": ["sql", "sharding"], "source": "manually curated seed data"},
-  {"id": "sql_008", "topic": "SQL", "difficulty": "advanced", "question": "MVCC 大致如何实现读已提交与可重复读？", "answer": "通过版本链/undo 与快照读时间戳或事务 id，读操作读取符合可见性规则的版本；不同隔离级别决定快照范围与锁策略。", "key_points": ["版本链", "快照", "可见性规则"], "tags": ["sql", "mvcc"], "source": "manually curated seed data"},
-  {"id": "rest_001", "topic": "REST API", "difficulty": "beginner", "question": "HTTP GET 与 POST 的典型语义区别？", "answer": "GET 应安全幂等，用于获取资源，参数常在 URL；POST 常用于创建或非幂等处理，body 传数据。", "key_points": ["幂等", "缓存", "语义"], "tags": ["rest", "http"], "source": "manually curated seed data"},
-  {"id": "rest_002", "topic": "REST API", "difficulty": "beginner", "question": "常见 2xx/4xx/5xx 状态码各举一例并说明含义。", "answer": "200 OK 成功；404 Not Found 资源不存在；500 Internal Server Error 服务器内部错误。", "key_points": ["成功", "客户端错误", "服务端错误"], "tags": ["rest", "status"], "source": "manually curated seed data"},
-  {"id": "rest_003", "topic": "REST API", "difficulty": "beginner", "question": "什么是幂等性？哪些 HTTP 方法通常应是幂等的？", "answer": "重复执行与一次执行效果相同；GET/PUT/DELETE 通常幂等；POST 默认不保证。", "key_points": ["重复安全", "方法语义"], "tags": ["rest", "idempotent"], "source": "manually curated seed data"},
-  {"id": "rest_004", "topic": "REST API", "difficulty": "intermediate", "question": "如何实现 API 版本管理？", "answer": "URL 路径版本、Header Accept 版本、查询参数等；需权衡缓存、兼容性与客户端升级成本。", "key_points": ["URL vs Header", "兼容性", "弃用策略"], "tags": ["rest", "versioning"], "source": "manually curated seed data"},
-  {"id": "rest_005", "topic": "REST API", "difficulty": "intermediate", "question": "JWT 认证大致流程与注意点？", "answer": "登录签发签名 token，客户端携带 Authorization；注意过期刷新、密钥轮换、不要在 payload 存敏感明文、防 XSS 存储方式。", "key_points": ["签名", "过期", "XSS", "HTTPS"], "tags": ["rest", "jwt"], "source": "manually curated seed data"},
-  {"id": "rest_006", "topic": "REST API", "difficulty": "intermediate", "question": "如何设计分页接口避免深度分页性能问题？", "answer": "使用 limit/offset 或游标（seek）分页；大数据量优先游标；提供排序稳定键。", "key_points": ["offset 问题", "cursor", "排序键"], "tags": ["rest", "pagination"], "source": "manually curated seed data"},
-  {"id": "rest_007", "topic": "REST API", "difficulty": "advanced", "question": "谈谈 REST 与 gRPC 的取舍。", "answer": "REST+JSON 易调试与浏览器友好；gRPC 二进制高效强类型，适合内部微服务；网关与观测需额外设计。", "key_points": ["可读性", "性能", "生态"], "tags": ["rest", "grpc"], "source": "manually curated seed data"},
-  {"id": "rest_008", "topic": "REST API", "difficulty": "advanced", "question": "如何实现接口限流与熔断的大致思路？", "answer": "令牌桶/漏桶限流，按用户或 IP 维度；熔断在错误率超阈值时快速失败并半开探测恢复；需与超时重试配合避免重试风暴。", "key_points": ["令牌桶", "熔断状态机", "重试风暴"], "tags": ["rest", "reliability"], "source": "manually curated seed data"},
-  {"id": "sd_001", "topic": "System Design", "difficulty": "beginner", "question": "设计短链接服务需要哪些核心组件？", "answer": "生成唯一短码、映射存储、重定向 HTTP 服务、缓存、统计与防滥用；需考虑冲突处理与扩容。", "key_points": ["短码生成", "KV 存储", "重定向", "缓存"], "tags": ["system-design"], "source": "manually curated seed data"},
-  {"id": "sd_002", "topic": "System Design", "difficulty": "beginner", "question": "什么是负载均衡？常见层次？", "answer": "将流量分发到多实例；DNS、L4 传输层、L7 应用层；各层粒度与健康检查不同。", "key_points": ["分发", "健康检查", "L4/L7"], "tags": ["system-design", "lb"], "source": "manually curated seed data"},
-  {"id": "sd_003", "topic": "System Design", "difficulty": "intermediate", "question": "如何为读多写少的系统设计缓存？", "answer": "Cache-aside：应用先读缓存 miss 再读库回写；注意 TTL、穿透/击穿/雪崩防护与一致性策略。", "key_points": ["Cache-aside", "TTL", "雪崩"], "tags": ["system-design", "cache"], "source": "manually curated seed data"},
-  {"id": "sd_004", "topic": "System Design", "difficulty": "intermediate", "question": "消息队列在系统中的典型用途？", "answer": "异步解耦、削峰填谷、可靠投递、事件驱动；需考虑重复消费、顺序性与死信队列。", "key_points": ["解耦", "削峰", "至少一次语义"], "tags": ["system-design", "mq"], "source": "manually curated seed data"},
-  {"id": "sd_005", "topic": "System Design", "difficulty": "intermediate", "question": "如何评估系统的可用性指标？", "answer": "可用性如 99.9% 年停机时间预算；结合 SLA/SLO/SLI，错误预算驱动发布与可靠性投入。", "key_points": ["9 的含义", "SLO/SLI", "错误预算"], "tags": ["system-design", "sre"], "source": "manually curated seed data"},
-  {"id": "sd_006", "topic": "System Design", "difficulty": "advanced", "question": "设计实时排行榜（游戏积分）要考虑什么？", "answer": "高频写入与排序，Redis Sorted Set 或分片聚合；周期性落库；热点用户与公平性校验；分区容错。", "key_points": ["ZSET", "分片", "热点", "持久化"], "tags": ["system-design", "realtime"], "source": "manually curated seed data"},
-  {"id": "sd_007", "topic": "System Design", "difficulty": "advanced", "question": "跨地域多活架构的主要挑战？", "answer": "数据冲突解决（向量时钟/业务规则）、复制延迟、法定人数与一致性模型选择、运维复杂度与成本。", "key_points": ["冲突", "延迟", "一致性模型"], "tags": ["system-design", "multi-region"], "source": "manually curated seed data"},
-  {"id": "rag_001", "topic": "AI / RAG Basics", "difficulty": "beginner", "question": "RAG 三个字母分别代表什么？解决什么问题？", "answer": "Retrieval-Augmented Generation：先检索相关知识再生成，缓解幻觉并接入私有/最新知识。", "key_points": ["检索", "增强", "幻觉"], "tags": ["rag", "llm"], "source": "manually curated seed data"},
-  {"id": "rag_002", "topic": "AI / RAG Basics", "difficulty": "beginner", "question": "向量检索的基本流程？", "answer": "文档切块、向量化写入向量库；查询向量化后在近似最近邻索引中检索 top-k，再拼入提示词。", "key_points": ["chunking", "embedding", "top-k"], "tags": ["rag", "vector"], "source": "manually curated seed data"},
-  {"id": "rag_003", "topic": "AI / RAG Basics", "difficulty": "intermediate", "question": "chunk size 与 overlap 如何影响效果？", "answer": "过小丢上下文，过大噪声多；overlap 可减少边界信息被切断，但增加存储与冗余。", "key_points": ["上下文完整性", "噪声", "overlap 作用"], "tags": ["rag", "chunk"], "source": "manually curated seed data"},
-  {"id": "rag_004", "topic": "AI / RAG Basics", "difficulty": "intermediate", "question": "什么是 rerank？为何需要？", "answer": "在向量召回后用交叉编码器等模型精排，提高最终片段相关性，弥补双塔召回不精准。", "key_points": ["两阶段", "精排", "相关性"], "tags": ["rag", "rerank"], "source": "manually curated seed data"},
-  {"id": "rag_005", "topic": "AI / RAG Basics", "difficulty": "intermediate", "question": "如何减少 RAG 中的幻觉？", "answer": "强制引用检索片段、温度降低、拒绝回答机制、事实校验与结构化输出。", "key_points": ["引用", "拒答", "温度"], "tags": ["rag", "quality"], "source": "manually curated seed data"},
-  {"id": "rag_006", "topic": "AI / RAG Basics", "difficulty": "advanced", "question": "混合检索（hybrid search）指什么？", "answer": "结合稀疏检索（BM25）与稠密向量检索，融合分数或倒数排名融合 RRF，提高召回覆盖与鲁棒性。", "key_points": ["BM25", "向量", "RRF"], "tags": ["rag", "hybrid"], "source": "manually curated seed data"},
-  {"id": "rag_007", "topic": "AI / RAG Basics", "difficulty": "advanced", "question": "评估 RAG 系统有哪些常见指标维度？", "answer": "检索命中率、nDCG、答案忠实度、相关性人工评测、端到端任务成功率与延迟成本。", "key_points": ["检索指标", "忠实度", "端到端"], "tags": ["rag", "eval"], "source": "manually curated seed data"},
-  {"id": "rag_008", "topic": "AI / RAG Basics", "difficulty": "advanced", "question": "GraphRAG 与传统 chunk RAG 的差异？", "answer": "GraphRAG 构建实体关系图以支持多跳推理与全局摘要；成本更高，适合复杂知识关联场景。", "key_points": ["图结构", "多跳", "成本"], "tags": ["rag", "graph"], "source": "manually curated seed data"}
+  {
+    "id": "q_1",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is the difference between compilation and interpretation?",
+    "answer": "Compilation translates source code into machine code creating an executable file. Interpretation translates and executes code line by line without an executable.",
+    "key_points": [
+      "source to machine code",
+      "creates executable",
+      "line-by-line translation",
+      "no executable output"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_2",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the concept of polymorphism.",
+    "answer": "Polymorphism allows objects of different classes to be treated as objects of a common superclass, enabling method overriding.",
+    "key_points": [
+      "Treat as superclass",
+      "method overriding",
+      "different classes objects"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_3",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "advanced",
+    "question": "Define encapsulation and give an example.",
+    "answer": "Encapsulation bundles data and methods in a class, restricting direct data access. Example: class with private data and public methods.",
+    "key_points": [
+      "Bundling data and methods",
+      "Restrict direct data access",
+      "Use private data",
+      "Use public methods"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_4",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is an abstract class, and how is it different from an interface?",
+    "answer": "An abstract class can't be instantiated and can have abstract and concrete methods. An interface only has method signatures without implementations.",
+    "key_points": [
+      "Can't instantiate abstract class",
+      "Abstract class has mixed methods",
+      "Interface has no implementations",
+      "Interface has only signatures"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_5",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the principles of Object-Oriented Programming (OOP).",
+    "answer": "OOP principles include encapsulation, inheritance, polymorphism, and abstraction, promoting organized and maintainable code.",
+    "key_points": [
+      "encapsulation",
+      "inheritance",
+      "polymorphism",
+      "abstraction"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_6",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is the purpose of a constructor?",
+    "answer": "A constructor initializes object properties upon class instantiation, ensuring a well-defined state.",
+    "key_points": [
+      "Object initialization",
+      "Class instantiation",
+      "Defined object state"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_7",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the difference between stack and heap memory.",
+    "answer": "Stack memory stores local variables and function calls; heap memory is for dynamic allocation. Stack operates in LIFO, heap managed manually or by garbage collection.",
+    "key_points": [
+      "Stack stores local vars",
+      "Heap for dynamic allocation",
+      "Stack uses LIFO order",
+      "Heap memory management"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_8",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a design pattern, and can you name a few?",
+    "answer": "Design patterns are solutions to common design problems. Examples: Singleton, Factory, Observer, MVC.",
+    "key_points": [
+      "Design pattern definition",
+      "Common problem solutions",
+      "Singleton pattern example",
+      "Factory pattern example"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_9",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "intermediate",
+    "question": "Define the term \"DRY\" in software development.",
+    "answer": "DRY (Don't Repeat Yourself) advocates for avoiding code duplication by reusing existing code.",
+    "key_points": [
+      "Avoid code duplication",
+      "Code reuse principle",
+      "DRY concept"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_10",
+    "topics": [
+      "general_programming"
+    ],
+    "difficulty": "advanced",
+    "question": "What is the SOLID principle?",
+    "answer": "SOLID represents five design principles for OOP: Single Responsibility, Open/Closed, Liskov Substitution, Interface Segregation, Dependency Inversion.",
+    "key_points": [
+      "Single Responsibility",
+      "Open/Closed Principle",
+      "Liskov Substitution",
+      "Interface Segregation",
+      "Dependency Inversion"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_11",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "beginner",
+    "question": "What is the difference between an array and a linked list?",
+    "answer": "An array has fixed size and stores elements in contiguous memory; a linked list consists of nodes with data and references, allowing dynamic size.",
+    "key_points": [
+      "Fixed array size",
+      "Contiguous memory",
+      "Dynamic list size",
+      "Node with data/reference"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_12",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the time complexity of an algorithm.",
+    "answer": "Time complexity measures the time an algorithm takes relative to its input size, expressed in Big O notation.",
+    "key_points": [
+      "Time complexity definition",
+      "Input size relation",
+      "Big O notation usage"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_13",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the difference between a binary search tree and a hash table.",
+    "answer": "A binary search tree is hierarchical, maintaining order; a hash table maps keys to values for fast retrieval, without maintaining order.",
+    "key_points": [
+      "BST hierarchical order",
+      "Hash table key mapping",
+      "Hash table fast retrieval",
+      "Hash table no order"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_14",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a linked list and how does it work?",
+    "answer": "A linked list is a series of nodes each containing data and a reference to the next node, allowing dynamic memory allocation and efficient insertions/deletions.",
+    "key_points": [
+      "Node structure",
+      "Dynamic memory allocation",
+      "Efficient insertions",
+      "Efficient deletions"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_15",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the concept of recursion.",
+    "answer": "Recursion is when a function calls itself to solve subproblems, with a base case to terminate recursion.",
+    "key_points": [
+      "Function self-calling",
+      "Solves subproblems",
+      "Base case",
+      "Recursion termination"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_16",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is Big O notation, and why is it important?",
+    "answer": "Big O notation describes the upper bound of algorithm time complexity, important for comparing efficiency and growth rates.",
+    "key_points": [
+      "Upper bound description",
+      "Algorithm time complexity",
+      "Compare algorithm efficiency",
+      "Growth rate measurement"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_17",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "advanced",
+    "question": "How do you perform a binary search on a sorted array?",
+    "answer": "Binary search divides the search interval in half, repeatedly comparing the middle element to the target.",
+    "key_points": [
+      "Divide interval in half",
+      "Compare middle element",
+      "Repeating comparison",
+      "Target matching check"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_18",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "intermediate",
+    "question": "Discuss the advantages and disadvantages of different sorting algorithms.",
+    "answer": "Sorting algorithms vary in time/space complexity and stability. Quick Sort and Merge Sort are fast but more complex; Insertion and Bubble Sort are simple but slower.",
+    "key_points": [
+      "Time/space complexity",
+      "Sorting stability",
+      "Quick Sort features",
+      "Simple sort traits"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_19",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain how a hash table works.",
+    "answer": "A hash table uses a hash function to map keys to values in an array, allowing fast O(1) access.",
+    "key_points": [
+      "Hash function usage",
+      "Key to value mapping",
+      "Array storage",
+      "O(1) fast access"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_20",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "advanced",
+    "question": "What is dynamic programming?",
+    "answer": "Dynamic programming solves complex problems by dividing them into smaller subproblems, avoiding redundant calculations.",
+    "key_points": [
+      "problem decomposition",
+      "subproblem solving",
+      "avoid redundant calculation"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_21",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is the difference between Java and JavaScript?",
+    "answer": "Java is a compiled, statically-typed language used for server-side, mobile, and desktop apps. JavaScript is an interpreted, dynamically-typed language for web development.",
+    "key_points": [
+      "Compiled vs interpreted",
+      "Static vs dynamic typing",
+      "Java application domains",
+      "JS application domain"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_22",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the MVC architectural pattern.",
+    "answer": "MVC divides an application into Model (data), View (UI), and Controller (input handling), promoting separation of concerns.",
+    "key_points": [
+      "MVC component division",
+      "separation of concerns",
+      "Model handles data",
+      "View handles UI",
+      "Controller handles input"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_23",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a RESTful API?",
+    "answer": "RESTful API is a web service implementation using HTTP methods to perform CRUD operations on resources, adhering to stateless, client-server architecture.",
+    "key_points": [
+      "RESTful API definition",
+      "HTTP method usage",
+      "CRUD operations",
+      "stateless constraint",
+      "client-server architecture"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_24",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the use of \"this\" keyword in JavaScript.",
+    "answer": "\"this\" in JavaScript refers to the execution context, varying based on function calling, global scope, or event handlers.",
+    "key_points": [
+      "Execution context",
+      "Function calling variation",
+      "Global scope impact",
+      "Event handler difference"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_25",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a closure in programming?",
+    "answer": "A closure is a function with access to its outer scope variables even after the outer function has executed.",
+    "key_points": [
+      "Closure definition",
+      "Outer scope access",
+      "Post-execution access"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_26",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "What are the differences between Python 2 and Python 3?",
+    "answer": "Python 3 has print as a function, true division, Unicode support by default, and different syntax for exceptions, unlike Python 2.",
+    "key_points": [
+      "print as function",
+      "true division",
+      "default Unicode",
+      "different exception syntax"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_27",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "advanced",
+    "question": "Discuss the role of a package manager like npm or pip.",
+    "answer": "Package managers manage installation, update, and dependency resolution of libraries, simplifying library management in development.",
+    "key_points": [
+      "Installation management",
+      "Update management",
+      "Dependency resolution",
+      "Simplify library management"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_28",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the concept of multi-threading in Java.",
+    "answer": "Multi-threading in Java allows concurrent execution of multiple threads, improving application responsiveness and performance.",
+    "key_points": [
+      "Java multi-threading",
+      "concurrent execution",
+      "improved responsiveness",
+      "better performance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_29",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a Singleton pattern?",
+    "answer": "Singleton ensures a class has only one instance and provides a global access point to it, useful for shared resources.",
+    "key_points": [
+      "single instance guarantee",
+      "global access point",
+      "shared resource use case"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_30",
+    "topics": [
+      "languages_and_frameworks"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a virtual function in C++?",
+    "answer": "Virtual functions in C++ allow derived classes to override them, enabling runtime polymorphism and dynamic method dispatch.",
+    "key_points": [
+      "override in derived class",
+      "runtime polymorphism",
+      "dynamic method dispatch"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_31",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a database index, and why is it important?",
+    "answer": "A database index speeds up data retrieval, similar to a book's index, improving query performance.",
+    "key_points": [
+      "Speeds up data retrieval",
+      "Similar to book index",
+      "Improves query performance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_32",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the differences between SQL and NoSQL databases.",
+    "answer": "SQL databases use structured query language with a predefined schema; NoSQL databases store schema-less data with flexible models.",
+    "key_points": [
+      "SQL predefined schema",
+      "SQL uses structured query",
+      "NoSQL schema-less data",
+      "NoSQL flexible models"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_33",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a foreign key in a database?",
+    "answer": "A foreign key links two tables by referring to the primary key in another table, ensuring referential integrity.",
+    "key_points": [
+      "Foreign key function",
+      "References primary key",
+      "Links two tables",
+      "Ensures referential integrity"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_34",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "advanced",
+    "question": "Describe the ACID properties in database transactions.",
+    "answer": "ACID: Atomicity (indivisible transactions), Consistency (consistent state transitions), Isolation (independent transactions), Durability (persisted changes).",
+    "key_points": [
+      "Atomicity",
+      "Consistency",
+      "Isolation",
+      "Durability"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_35",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "beginner",
+    "question": "How do you optimize a SQL query for better performance?",
+    "answer": "Optimize using indexes, efficient SQL, limiting data retrieval, analyzing query performance, and considering denormalization.",
+    "key_points": [
+      "Use indexes for optimization",
+      "Write efficient SQL",
+      "Limit data retrieval",
+      "Analyze query performance",
+      "Consider denormalization"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_36",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "advanced",
+    "question": "What is normalization in database design?",
+    "answer": "Normalization organizes data into separate tables to reduce redundancy and improve integrity, following normalization forms.",
+    "key_points": [
+      "Reduce data redundancy",
+      "Improve data integrity",
+      "Separate data tables",
+      "Normalization forms"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_37",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the difference between INNER JOIN and LEFT JOIN in SQL.",
+    "answer": "INNER JOIN returns matching rows from both tables; LEFT JOIN returns all rows from the left table and matching rows from the right.",
+    "key_points": [
+      "INNER JOIN behavior",
+      "LEFT JOIN behavior",
+      "matching rows return",
+      "left table all rows"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_38",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a stored procedure, and when would you use one?",
+    "answer": "Stored procedures are precompiled SQL statements for data manipulation and logic, used for repetitive tasks and improving performance.",
+    "key_points": [
+      "Precompiled SQL statements",
+      "Data manipulation logic",
+      "Repetitive task usage",
+      "Performance improvement"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_39",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is database denormalization, and when is it appropriate?",
+    "answer": "Denormalization introduces redundancy for performance, useful in read-heavy scenarios at the expense of storage and complexity.",
+    "key_points": [
+      "Performance improvement",
+      "Redundancy introduction",
+      "Read-heavy scenarios",
+      "Storage cost tradeoff"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_40",
+    "topics": [
+      "database_and_sql"
+    ],
+    "difficulty": "intermediate",
+    "question": "Discuss the advantages and disadvantages of using an ORM tool.",
+    "answer": "ORM simplifies database interactions and is language-agnostic. It can introduce performance overhead and may limit database features.",
+    "key_points": [
+      "Simplifies DB interactions",
+      "Language-agnostic property",
+      "Introduces performance overhead",
+      "Limits database features"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_41",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "advanced",
+    "question": "What is the Document Object Model (DOM)?",
+    "answer": "The DOM is a tree-like representation of a web page's structure, allowing manipulation of content, structure, and style via programming languages.",
+    "key_points": [
+      "Tree-like structure",
+      "Web page structure representation",
+      "Content manipulation",
+      "Style/structure manipulation"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_42",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the difference between HTTP and HTTPS.",
+    "answer": "HTTP is an unsecured data transmission protocol; HTTPS is secure, encrypting data in transit using SSL/TLS.",
+    "key_points": [
+      "HTTP is unsecured",
+      "HTTPS is secure",
+      "HTTPS uses SSL/TLS",
+      "HTTPS encrypts data"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_43",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is CORS (Cross-Origin Resource Sharing)?",
+    "answer": "CORS is a security measure allowing or restricting resources requested from another domain, managed via HTTP headers.",
+    "key_points": [
+      "Cross-origin resource sharing",
+      "security measure",
+      "domain resource control",
+      "HTTP header management"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_44",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the purpose of a web server like Apache or Nginx.",
+    "answer": "Web servers handle HTTP requests, serve content, manage security, routing, and can act as reverse proxies for application servers.",
+    "key_points": [
+      "Handle HTTP requests",
+      "Serve content",
+      "Manage security & routing",
+      "Reverse proxy function"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_45",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "advanced",
+    "question": "What is a cookie, and how does it work?",
+    "answer": "Cookies are data stored on the user's computer by the web server, sent with HTTP requests for session management, tracking, and storing preferences.",
+    "key_points": [
+      "Cookie definition",
+      "Storage location",
+      "HTTP request usage",
+      "Core functions"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_46",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a session in web development?",
+    "answer": "A session maintains stateful information across multiple HTTP requests, typically for user authentication and data storage.",
+    "key_points": [
+      "Session definition",
+      "Stateful information",
+      "Across HTTP requests",
+      "Common usages"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_47",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the concept of responsive web design.",
+    "answer": "Responsive design ensures web content functions across different devices and screen sizes, using CSS media queries and flexible layouts.",
+    "key_points": [
+      "Responsive design purpose",
+      "Cross-device compatibility",
+      "CSS media queries",
+      "Flexible layouts"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_48",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the differences between GET and POST requests.",
+    "answer": "GET requests retrieve data and include parameters in the URL; POST requests send data to the server, encapsulating data in the request body.",
+    "key_points": [
+      "GET retrieves data",
+      "GET params in URL",
+      "POST sends data",
+      "POST data in body"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_49",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is the importance of SEO in web development?",
+    "answer": "SEO enhances a website's visibility in search engine results, improving organic traffic and user reach through optimized content and structure.",
+    "key_points": [
+      "Improve website visibility",
+      "Boost organic traffic",
+      "Expand user reach",
+      "Optimize content/structure"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_50",
+    "topics": [
+      "web_development"
+    ],
+    "difficulty": "intermediate",
+    "question": "How does a web browser render a web page?",
+    "answer": "Browsers parse HTML to create a DOM, fetch resources, build a rendering tree, apply CSS, calculate layout, and paint the page on the screen.",
+    "key_points": [
+      "HTML parsing",
+      "DOM creation",
+      "render tree building",
+      "CSS application",
+      "page painting"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_51",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is unit testing, and why is it important?",
+    "answer": "Unit testing evaluates individual code components, ensuring correctness and facilitating early defect detection.",
+    "key_points": [
+      "Individual component check",
+      "Correctness assurance",
+      "Early defect detection"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_52",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the difference between black-box and white-box testing.",
+    "answer": "Black-box tests functionality without internal code knowledge; white-box tests internal code logic and structure.",
+    "key_points": [
+      "Black-box testing",
+      "No internal code knowledge",
+      "Tests functionality",
+      "White-box testing",
+      "Tests internal code logic"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_53",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "beginner",
+    "question": "What is regression testing?",
+    "answer": "Regression testing ensures new code changes don't break existing features, maintaining functionality over updates.",
+    "key_points": [
+      "Verify no existing break",
+      "Maintain functionality",
+      "For new code changes"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_54",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "advanced",
+    "question": "Describe the purpose of code reviews.",
+    "answer": "Code reviews identify defects, improve quality, enforce standards, and facilitate knowledge sharing.",
+    "key_points": [
+      "identify defects",
+      "improve code quality",
+      "enforce standards",
+      "facilitate knowledge sharing"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_55",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is continuous integration (CI) and continuous delivery (CD)?",
+    "answer": "CI involves frequent code integration and testing; CD extends CI by deploying changes to production automatically after testing.",
+    "key_points": [
+      "Frequent code integration",
+      "Frequent code testing",
+      "CI extends to CD",
+      "Auto deployment to production"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_56",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the concept of code coverage in testing.",
+    "answer": "Code coverage measures the extent of code tested, assessing test thoroughness and identifying untested areas.",
+    "key_points": [
+      "Definition of code coverage",
+      "Measures test extent",
+      "Assesses test thoroughness",
+      "Identifies untested areas"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_57",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a test case and how do you write one?",
+    "answer": "A test case outlines test conditions, inputs, and expected results, structured with objective, steps, and documentation.",
+    "key_points": [
+      "Test case components",
+      "Test conditions outline",
+      "Input and expected result",
+      "Structure elements"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_58",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is load testing, and why is it necessary?",
+    "answer": "Load testing evaluates system performance under expected load conditions, identifying bottlenecks and scalability issues.",
+    "key_points": [
+      "System performance check",
+      "Expected load testing",
+      "Bottleneck identification",
+      "Scalability issue detection"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_59",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "advanced",
+    "question": "Describe the differences between manual and automated testing.",
+    "answer": "Manual testing is human-driven; suitable for exploratory and UX testing. Automated testing uses tools for repetitive tasks; suitable for regression and performance testing.",
+    "key_points": [
+      "Human-driven testing",
+      "Exploratory/UX suitability",
+      "Tool-based automation",
+      "Repetitive task use",
+      "Regression/performance suitability"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_60",
+    "topics": [
+      "software_testing"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a bug tracking system?",
+    "answer": "A bug tracking system logs, manages, and resolves issues in software development, ensuring systematic problem handling.",
+    "key_points": [
+      "Bug logging function",
+      "Issue management",
+      "Issue resolution",
+      "Software dev use"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_61",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is Git, and how does it work?",
+    "answer": "Git is a distributed version control system for tracking changes in source code, allowing collaborative work and branch management.",
+    "key_points": [
+      "Distributed VCS",
+      "Track code changes",
+      "Enable collaboration",
+      "Branch management"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_62",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the difference between Git and SVN (Subversion).",
+    "answer": "Git is distributed, with local repository copies; SVN is centralized, requiring network connectivity for repository access.",
+    "key_points": [
+      "Git is distributed",
+      "local repo copies",
+      "SVN is centralized",
+      "SVN needs network"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_63",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a merge conflict, and how do you resolve it in Git?",
+    "answer": "Merge conflicts occur when changes in different branches clash. Resolve by manually editing files and committing the result.",
+    "key_points": [
+      "Conflict definition",
+      "Clash between branches",
+      "Manual conflict resolution",
+      "Commit resolved result"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_64",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the purpose of branching in version control.",
+    "answer": "Branching isolates development work without affecting other parts of the repository, aiding in feature development and experimentation.",
+    "key_points": [
+      "Isolate development work",
+      "No repository impact",
+      "Aid feature development",
+      "Support experimentation"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_65",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a pull request (PR), and how does it work?",
+    "answer": "A PR is a request to merge code from one branch to another, facilitating code review and discussion before integration.",
+    "key_points": [
+      "PR definition",
+      "code merge purpose",
+      "code review facilitation"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_66",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "intermediate",
+    "question": "How do you handle code conflicts in a team project?",
+    "answer": "Resolve code conflicts through communication, careful review, manual merging, testing, and documenting resolutions.",
+    "key_points": [
+      "Team communication",
+      "Code conflict review",
+      "Manual merging",
+      "Conflict testing",
+      "Resolution documentation"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_67",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is code refactoring, and why is it important?",
+    "answer": "Refactoring improves code structure and readability without altering functionality, enhancing maintainability and quality.",
+    "key_points": [
+      "Improves code structure",
+      "Improves readability",
+      "Preserves functionality",
+      "Enhances maintainability"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_68",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the role of Git branching strategies like GitFlow.",
+    "answer": "GitFlow organizes branches and releases, defining naming conventions and branch purposes for structured and organized development.",
+    "key_points": [
+      "Branch organization",
+      "Release management",
+      "Naming conventions",
+      "Branch purpose definition"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_69",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "advanced",
+    "question": "What is Git rebase, and when would you use it?",
+    "answer": "Git rebase re-applies commits onto another base for a cleaner history. Use with caution to maintain a linear project history.",
+    "key_points": [
+      "Reapplies commits",
+      "Cleaner project history",
+      "Linear history maintenance",
+      "Use with caution"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_70",
+    "topics": [
+      "version_control"
+    ],
+    "difficulty": "intermediate",
+    "question": "Discuss the advantages of distributed version control systems.",
+    "answer": "Distributed systems allow offline work, flexible branching/merging, faster operations, redundancy, and collaborative workflows.",
+    "key_points": [
+      "Offline work support",
+      "Flexible branch merge",
+      "Fast operations",
+      "Redundancy provision",
+      "Collaborative workflows"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_71",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the concept of microservices architecture.",
+    "answer": "Microservices architecture consists of small, independent services communicating via APIs, each responsible for specific functionality, promoting scalability and maintenance.",
+    "key_points": [
+      "Independent small services",
+      "API communication",
+      "Specific functionality",
+      "Improved scalability",
+      "Easy maintenance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_72",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a load balancer, and why is it used in web applications?",
+    "answer": "A load balancer distributes incoming traffic across servers, ensuring resource efficiency, fault tolerance, and high availability.",
+    "key_points": [
+      "traffic distribution",
+      "resource efficiency",
+      "fault tolerance",
+      "high availability"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_73",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the importance of caching in web applications.",
+    "answer": "Caching stores frequently accessed data for faster retrieval, reducing backend load, improving performance, and enhancing user experience.",
+    "key_points": [
+      "frequent data storage",
+      "faster data retrieval",
+      "reduces backend load",
+      "improves performance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_74",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a CDN (Content Delivery Network)?",
+    "answer": "A CDN is a network of servers for delivering content efficiently to users based on geographic proximity, reducing latency and load times.",
+    "key_points": [
+      "Content delivery purpose",
+      "Geographic proximity",
+      "Latency reduction",
+      "Faster load times"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_75",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "intermediate",
+    "question": "Discuss the pros and cons of monolithic vs. microservices architecture.",
+    "answer": "Monolithic is simple but less scalable; microservices offer scalability and flexibility but are complex to manage.",
+    "key_points": [
+      "Monolithic pros and cons",
+      "Microservices pros and cons",
+      "Monolithic vs microservices"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_76",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "What is a stateless vs. stateful service?",
+    "answer": "Stateless services don't retain client data between requests; stateful services maintain client state, useful for sessions and transactions.",
+    "key_points": [
+      "Stateless service feature",
+      "Stateful service feature",
+      "Stateful use cases"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_77",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "beginner",
+    "question": "Explain the concept of CAP theorem in distributed systems.",
+    "answer": "The CAP theorem states that in a distributed system, you cannot simultaneously guarantee Consistency, Availability, and Partition Tolerance at all times.",
+    "key_points": [
+      "CAP theorem definition",
+      "distributed system context",
+      "Consistency guarantee",
+      "Availability guarantee",
+      "Partition Tolerance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_78",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "How do you ensure data consistency in a distributed database?",
+    "answer": "Ensure consistency using strong consistency models, two-phase commits, optimistic concurrency control, and conflict resolution strategies.",
+    "key_points": [
+      "Strong consistency models",
+      "Two-phase commits",
+      "Optimistic concurrency control",
+      "Conflict resolution strategies"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_79",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the role of a reverse proxy in a web application.",
+    "answer": "A reverse proxy routes client requests to appropriate servers, providing load balancing, SSL termination, caching, and security.",
+    "key_points": [
+      "Reverse proxy function",
+      "Load balancing",
+      "SSL termination",
+      "Caching",
+      "Security"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_80",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a message broker, and when would you use one?",
+    "answer": "A message broker facilitates communication in distributed systems through asynchronous messaging, used in event-driven architectures and high-volume scenarios.",
+    "key_points": [
+      "Asynchronous messaging",
+      "Distributed systems communication",
+      "Event-driven architecture use",
+      "High-volume scenarios use"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_81",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is SQL injection, and how can it be prevented?",
+    "answer": "SQL injection exploits vulnerabilities to execute malicious SQL. Prevent with parameterized queries, input validation, and least privilege access.",
+    "key_points": [
+      "SQL injection definition",
+      "prevention methods",
+      "parameterized queries",
+      "input validation",
+      "least privilege access"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_82",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the concept of Cross-Site Scripting (XSS).",
+    "answer": "XSS injects malicious scripts into web apps, executed by users' browsers. Prevent with input validation, output encoding, and CSP.",
+    "key_points": [
+      "XSS definition",
+      "browser execution",
+      "input validation",
+      "output encoding",
+      "CSP prevention"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_83",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "advanced",
+    "question": "What is two-factor authentication (2FA)?",
+    "answer": "2FA adds extra security by requiring two verification forms: something known (password) and something possessed (device).",
+    "key_points": [
+      "Two-factor requirement",
+      "extra security addition",
+      "something known factor",
+      "something possessed factor"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_84",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the process of password hashing and salting.",
+    "answer": "Hashing transforms passwords into hashes using algorithms; salting adds randomness, enhancing security against attacks.",
+    "key_points": [
+      "password hashing",
+      "password salting",
+      "adds randomness",
+      "enhances security"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_85",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is OAuth, and how does it work?",
+    "answer": "OAuth allows third-party app access to user data without exposing credentials, using access tokens for authorization.",
+    "key_points": [
+      "Third-party access",
+      "Credential protection",
+      "Access token usage",
+      "Authorization mechanism"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_86",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "intermediate",
+    "question": "How do you protect against session fixation attacks?",
+    "answer": "Protect by regenerating session IDs post-authentication, using unpredictable IDs, and tying IDs to user authentication.",
+    "key_points": [
+      "Regenerate session IDs post-auth",
+      "Use unpredictable session IDs",
+      "Bind IDs to authentication"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_87",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the principles of least privilege and defense in depth.",
+    "answer": "Least privilege limits access rights; defense in depth layers security. Both minimize attack surfaces and provide redundancy.",
+    "key_points": [
+      "Least privilege access limit",
+      "defense in depth layering",
+      "attack surface minimization",
+      "security redundancy"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_88",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a DDoS (Distributed Denial of Service) attack?",
+    "answer": "A DDoS attack overwhelms a target with traffic, causing unavailability. Mitigate with DDoS protection, rate limiting, and traffic analysis.",
+    "key_points": [
+      "DDoS attack definition",
+      "traffic overwhelm target",
+      "service unavailability",
+      "DDoS mitigation methods"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_89",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "intermediate",
+    "question": "How can you secure sensitive data in a mobile app?",
+    "answer": "Secure data by encrypting at rest and in transit, using secure authentication, and following best practices.",
+    "key_points": [
+      "Encrypt at rest",
+      "Encrypt in transit",
+      "Secure authentication",
+      "Follow best practices"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_90",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "intermediate",
+    "question": "Discuss the importance of security in API design.",
+    "answer": "API security is vital to protect data and prevent unauthorized access, using authentication, validation, rate limiting, and encryption.",
+    "key_points": [
+      "Data protection",
+      "Unauthorized access prevention",
+      "API authentication",
+      "Input validation",
+      "Encryption usage"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_91",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is Docker, and how does it work?",
+    "answer": "Docker is a containerization platform packaging applications with dependencies, ensuring consistent environments across systems.",
+    "key_points": [
+      "Docker definition",
+      "containerization platform",
+      "app + dependency packaging",
+      "consistent environment guarantee"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_92",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the concept of container orchestration.",
+    "answer": "Container orchestration automates deployment, scaling, and management of containers, optimizing resource use and handling failures.",
+    "key_points": [
+      "Container orchestration definition",
+      "Deployment automation",
+      "Container scaling",
+      "Failure handling",
+      "Resource optimization"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_93",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is Kubernetes, and why is it popular in container management?",
+    "answer": "Kubernetes is an open-source container orchestration platform automating deployment and management, known for its scalability and community support.",
+    "key_points": [
+      "Open-source platform",
+      "Container orchestration",
+      "Automates deployment",
+      "Scalability feature",
+      "Community support"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_94",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "advanced",
+    "question": "Describe the process of continuous integration and continuous delivery (CI/CD).",
+    "answer": "CI/CD automates build, test, and deployment processes, delivering code changes rapidly and reliably to production.",
+    "key_points": [
+      "CI/CD process automation",
+      "rapid code delivery",
+      "reliable deployment"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_95",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "beginner",
+    "question": "What is infrastructure as code (IaC)?",
+    "answer": "IaC manages infrastructure using code, ensuring consistency, automation, and version control in deployments.",
+    "key_points": [
+      "Infrastructure as Code definition",
+      "Deployment consistency",
+      "Automation of deployments",
+      "Infrastructure version control"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_96",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "advanced",
+    "question": "How do you monitor the performance of a web application?",
+    "answer": "Monitor using tools to collect and analyze data on response times, resource utilization, error rates, and user experience.",
+    "key_points": [
+      "Response time monitoring",
+      "Resource utilization tracking",
+      "Error rate analysis",
+      "User experience monitoring"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_97",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Discuss the importance of automated testing in CI/CD pipelines.",
+    "answer": "Automated testing in CI/CD ensures code changes are defect-free, enhancing reliability and speeding up delivery.",
+    "key_points": [
+      "CI/CD automated testing",
+      "defect prevention",
+      "improves reliability",
+      "speeds up delivery"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_98",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is Blue-Green deployment, and when would you use it?",
+    "answer": "Blue-Green deployment alternates between two production environments for easy rollbacks and minimal downtime during updates.",
+    "key_points": [
+      "Two environments",
+      "Easy rollbacks",
+      "Minimal downtime",
+      "Deployment alternation"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_99",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the role of a configuration management tool like Ansible.",
+    "answer": "Configuration management tools automate provisioning and management of software and infrastructure, ensuring consistency and efficiency.",
+    "key_points": [
+      "Automation of provisioning",
+      "Infrastructure management",
+      "Software management",
+      "Ensures consistency",
+      "Improves efficiency"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_100",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the benefits of using a cloud platform like AWS, Azure, or Google Cloud.",
+    "answer": "Cloud platforms offer scalability, cost-efficiency, global reach, and managed services, reducing operational burdens with security and compliance features.",
+    "key_points": [
+      "Scalability",
+      "Cost-efficiency",
+      "Global reach",
+      "Managed services",
+      "Security compliance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_101",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the concept of 'closure' in JavaScript.",
+    "answer": "A closure is a function that remembers its outer variables and can access them.",
+    "key_points": [
+      "Closure definition",
+      "Remembers outer variables",
+      "Accesses outer variables"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_102",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the use of Docker in a DevOps environment.",
+    "answer": "Docker allows for packaging applications in containers, facilitating consistent deployment across different environments.",
+    "key_points": [
+      "Application packaging",
+      "Container usage",
+      "Consistent deployment"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_103",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is a 'race condition' in software development?",
+    "answer": "A race condition occurs when the system's behavior depends on the sequence or timing of other uncontrollable events.",
+    "key_points": [
+      "Definition of race condition",
+      "Depends on event sequence",
+      "Depends on event timing",
+      "Uncontrollable events"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_104",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "advanced",
+    "question": "How would you optimize a website's load time?",
+    "answer": "Optimizations can include minimizing HTTP requests, using CDNs, compressing files, caching, etc.",
+    "key_points": [
+      "Minimize HTTP requests",
+      "Use CDNs",
+      "Compress files",
+      "Implement caching"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_105",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is the difference between SQL and NoSQL databases?",
+    "answer": "SQL databases are structured, use SQL, and are better for complex queries. NoSQL databases are flexible, scale well, and are good for hierarchical data storage.",
+    "key_points": [
+      "SQL characteristics",
+      "SQL use cases",
+      "NoSQL characteristics",
+      "NoSQL use cases"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_106",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Can you explain the concept of 'state' in React?",
+    "answer": "State in React is an object that holds some information that may change over the lifecycle of the component.",
+    "key_points": [
+      "Definition of React state",
+      "React state is an object",
+      "Holds changing information",
+      "Component lifecycle related"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_107",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is continuous integration in DevOps?",
+    "answer": "Continuous integration is the practice of automating the integration of code changes into a software project.",
+    "key_points": [
+      "CI definition",
+      "code change integration",
+      "automation practice",
+      "software project practice"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_108",
+    "topics": [
+      "full_stack"
+    ],
+    "difficulty": "intermediate",
+    "question": "How do you implement a binary search algorithm?",
+    "answer": "Binary search involves repeatedly dividing in half the portion of the list that could contain the item, until you've narrowed the possibilities to just one.",
+    "key_points": [
+      "Repeated half division",
+      "Narrow possibilities",
+      "Sorted list search",
+      "Target location"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_109",
+    "topics": [
+      "full_stack"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the MVC architecture.",
+    "answer": "MVC architecture stands for Model-View-Controller, separating the application into three interconnected components.",
+    "key_points": [
+      "MVC full name",
+      "three components",
+      "separation of concerns"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_110",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What are microservices and how do they differ from monolithic architectures?",
+    "answer": "Microservices are a software development technique—a variant of the service-oriented architecture architectural style that structures an application as a collection of loosely coupled services. In a monolithic architecture, all components are interconnected and interdependent.",
+    "key_points": [
+      "Microservices definition",
+      "Service-oriented style variant",
+      "Loosely coupled services",
+      "Monolithic architecture trait"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_111",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the difference between '==' and '===' in JavaScript.",
+    "answer": "'==' compares values after type conversion, while '===' compares both value and type.",
+    "key_points": [
+      "== converts type",
+      "=== checks type",
+      "both compare values"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_112",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is Kubernetes and how does it relate to containerization?",
+    "answer": "Kubernetes is an open-source platform for automating deployment, scaling, and operations of application containers across clusters of hosts.",
+    "key_points": [
+      "Open-source platform",
+      "Container deployment automation",
+      "Container scaling",
+      "Cluster host operations"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_113",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe how you would implement a RESTful API in a back-end application.",
+    "answer": "A RESTful API is implemented by setting up HTTP routes (GET, POST, PUT, DELETE) and handling requests and responses in a stateless manner, often using JSON.",
+    "key_points": [
+      "HTTP routes setup",
+      "stateless operation",
+      "JSON data usage",
+      "request/response handling"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_114",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What are the benefits of server-side rendering vs client-side rendering?",
+    "answer": "Server-side rendering improves initial page load time and SEO, while client-side rendering is good for dynamic websites with less initial loading content.",
+    "key_points": [
+      "Improves initial load time",
+      "Improves SEO",
+      "Good for dynamic sites",
+      "Less initial content"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_115",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "How do NoSQL databases handle data scaling compared to traditional SQL databases?",
+    "answer": "NoSQL databases are generally more scalable and provide superior performance for large-scale applications due to their flexibility in handling unstructured data.",
+    "key_points": [
+      "Better scalability",
+      "Superior performance",
+      "Handles unstructured data",
+      "Large-scale app fit"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_116",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the use of hooks in React.",
+    "answer": "Hooks are functions that let you 'hook into' React state and lifecycle features from function components.",
+    "key_points": [
+      "React feature",
+      "function components",
+      "hook into state",
+      "hook into lifecycle"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_117",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is Infrastructure as Code (IaC) and its significance in DevOps?",
+    "answer": "IaC is the management of infrastructure (networks, virtual machines, load balancers, etc.) in a descriptive model, using code, which increases development and deployment speed.",
+    "key_points": [
+      "Infrastructure as Code definition",
+      "Descriptive model management",
+      "Code-based infrastructure",
+      "Improves deployment speed"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_118",
+    "topics": [
+      "full_stack"
+    ],
+    "difficulty": "advanced",
+    "question": "Describe the process of memoization in programming.",
+    "answer": "Memoization is an optimization technique used to speed up programs by storing the results of expensive function calls.",
+    "key_points": [
+      "Definition of memoization",
+      "optimization technique",
+      "store function results",
+      "speed up programs"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_119",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "beginner",
+    "question": "What are the advantages of using a microservices architecture?",
+    "answer": "Advantages include easier scalability, flexibility in choosing technology, better fault isolation, and improved continuous deployment.",
+    "key_points": [
+      "Easier scalability",
+      "Technology flexibility",
+      "Better fault isolation",
+      "Improved continuous deployment"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_120",
+    "topics": [
+      "full_stack"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the SOLID principles in software engineering.",
+    "answer": "SOLID stands for Single Responsibility, Open-Closed, Liskov Substitution, Interface Segregation, and Dependency Inversion principles, guiding towards more maintainable, understandable, and flexible software.",
+    "key_points": [
+      "Meaning of SOLID",
+      "SOLID principles list",
+      "Benefits of SOLID"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_121",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is lazy loading in web development?",
+    "answer": "Lazy loading is a design pattern that delays loading of non-critical resources at page load time, reducing initial load time and page weight.",
+    "key_points": [
+      "Lazy loading definition",
+      "delays non-critical loading",
+      "reduces initial load time",
+      "reduces page weight"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_122",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Discuss the role of a load balancer in a distributed system.",
+    "answer": "A load balancer distributes network or application traffic across multiple servers to enhance responsiveness and availability of applications.",
+    "key_points": [
+      "Traffic distribution",
+      "Multiple servers",
+      "Responsiveness boost",
+      "Availability improvement"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_123",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "How does indexing improve database query performance?",
+    "answer": "Indexing speeds up data retrieval operations by effectively creating a smaller, faster version of the database table.",
+    "key_points": [
+      "Speeds up retrieval",
+      "Creates smaller table",
+      "Faster table version",
+      "Indexing function"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_124",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain event delegation in JavaScript.",
+    "answer": "Event delegation refers to the practice of using a single event listener to manage all events of a specific type for child elements.",
+    "key_points": [
+      "Definition of event delegation",
+      "Single event listener usage",
+      "Manage child element events"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_125",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the concept of 'closure' in JavaScript.",
+    "answer": "A closure is a function that remembers its outer variables and can access them.",
+    "key_points": [
+      "Closure definition",
+      "Remembers outer variables",
+      "Accesses outer variables"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_126",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the use of Docker in a DevOps environment.",
+    "answer": "Docker allows for packaging applications in containers, facilitating consistent deployment across different environments.",
+    "key_points": [
+      "Application packaging",
+      "Containerization",
+      "Consistent deployment",
+      "Cross-environment support"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_127",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "advanced",
+    "question": "What is a 'race condition' in software development?",
+    "answer": "A race condition occurs when the system's behavior depends on the sequence or timing of other uncontrollable events.",
+    "key_points": [
+      "Definition of race condition",
+      "Depends on sequence",
+      "Depends on timing",
+      "Uncontrollable events"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_128",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "How would you optimize a website's load time?",
+    "answer": "Optimizations can include minimizing HTTP requests, using CDNs, compressing files, caching, etc.",
+    "key_points": [
+      "Minimize HTTP requests",
+      "Use CDNs",
+      "Compress files",
+      "Implement caching"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_129",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is the difference between SQL and NoSQL databases?",
+    "answer": "SQL databases are structured, use SQL, and are better for complex queries. NoSQL databases are flexible, scale well, and are good for hierarchical data storage.",
+    "key_points": [
+      "SQL structured storage",
+      "SQL for complex queries",
+      "NoSQL flexible schema",
+      "NoSQL good scaling",
+      "NoSQL for hierarchical data"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_130",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Can you explain the concept of 'state' in React?",
+    "answer": "State in React is an object that holds some information that may change over the lifecycle of the component.",
+    "key_points": [
+      "React state definition",
+      "holds changeable info",
+      "component lifecycle"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_131",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is continuous integration in DevOps?",
+    "answer": "Continuous integration is the practice of automating the integration of code changes into a software project.",
+    "key_points": [
+      "CI definition",
+      "code change integration",
+      "automation practice"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_132",
+    "topics": [
+      "full_stack"
+    ],
+    "difficulty": "intermediate",
+    "question": "How do you implement a binary search algorithm?",
+    "answer": "Binary search involves repeatedly dividing in half the portion of the list that could contain the item, until you've narrowed the possibilities to just one.",
+    "key_points": [
+      "Repeatedly halving search range",
+      "Narrow possible candidates",
+      "Locates target item",
+      "Works on sorted list"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_133",
+    "topics": [
+      "full_stack"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the MVC architecture.",
+    "answer": "MVC architecture stands for Model-View-Controller, separating the application into three interconnected components.",
+    "key_points": [
+      "Three core components",
+      "Component separation",
+      "MVC full name"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_134",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "advanced",
+    "question": "What are microservices and how do they differ from monolithic architectures?",
+    "answer": "Microservices are a software development technique—a variant of the service-oriented architecture architectural style that structures an application as a collection of loosely coupled services. In a monolithic architecture, all components are interconnected and interdependent.",
+    "key_points": [
+      "Microservices definition",
+      "Loosely coupled services",
+      "Monolithic architecture",
+      "Interdependent components"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_135",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "beginner",
+    "question": "Explain the difference between '==' and '===' in JavaScript.",
+    "answer": "'==' compares values after type conversion, while '===' compares both value and type.",
+    "key_points": [
+      "Value comparison after conversion",
+      "Type check for ===",
+      "Compare both value and type",
+      "Difference between == and ==="
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_136",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "advanced",
+    "question": "What is Kubernetes and how does it relate to containerization?",
+    "answer": "Kubernetes is an open-source platform for automating deployment, scaling, and operations of application containers across clusters of hosts.",
+    "key_points": [
+      "Open-source platform",
+      "Container automation",
+      "Application deployment",
+      "Cluster management"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_137",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe how you would implement a RESTful API in a back-end application.",
+    "answer": "A RESTful API is implemented by setting up HTTP routes (GET, POST, PUT, DELETE) and handling requests and responses in a stateless manner, often using JSON.",
+    "key_points": [
+      "HTTP routes setup",
+      "stateless handling",
+      "JSON data format",
+      "REST API methods"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_138",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What are the benefits of server-side rendering vs client-side rendering?",
+    "answer": "Server-side rendering improves initial page load time and SEO, while client-side rendering is good for dynamic websites with less initial loading content.",
+    "key_points": [
+      "Improves initial load time",
+      "Better SEO performance",
+      "Good for dynamic sites",
+      "Less initial content"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_139",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "How do NoSQL databases handle data scaling compared to traditional SQL databases?",
+    "answer": "NoSQL databases are generally more scalable and provide superior performance for large-scale applications due to their flexibility in handling unstructured data.",
+    "key_points": [
+      "Scalability of NoSQL",
+      "NoSQL performance",
+      "Unstructured data handling"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_140",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the use of hooks in React.",
+    "answer": "Hooks are functions that let you 'hook into' React state and lifecycle features from function components.",
+    "key_points": [
+      "React hook definition",
+      "hook into React features",
+      "function components use"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_141",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "advanced",
+    "question": "What is Infrastructure as Code (IaC) and its significance in DevOps?",
+    "answer": "IaC is the management of infrastructure (networks, virtual machines, load balancers, etc.) in a descriptive model, using code, which increases development and deployment speed.",
+    "key_points": [
+      "Infrastructure definition",
+      "Code-based management",
+      "Descriptive model",
+      "Speed improvement"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_142",
+    "topics": [
+      "full_stack"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the process of memoization in programming.",
+    "answer": "Memoization is an optimization technique used to speed up programs by storing the results of expensive function calls.",
+    "key_points": [
+      "Optimization technique",
+      "Speed up programs",
+      "Store function results"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_143",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What are the advantages of using a microservices architecture?",
+    "answer": "Advantages include easier scalability, flexibility in choosing technology, better fault isolation, and improved continuous deployment.",
+    "key_points": [
+      "Easier scalability",
+      "Technology flexibility",
+      "Better fault isolation",
+      "Improved continuous deployment"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_144",
+    "topics": [
+      "full_stack"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the SOLID principles in software engineering.",
+    "answer": "SOLID stands for Single Responsibility, Open-Closed, Liskov Substitution, Interface Segregation, and Dependency Inversion principles, guiding towards more maintainable, understandable, and flexible software.",
+    "key_points": [
+      "Meaning of SOLID",
+      "Five SOLID principles",
+      "Benefits of SOLID"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_145",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "What is lazy loading in web development?",
+    "answer": "Lazy loading is a design pattern that delays loading of non-critical resources at page load time, reducing initial load time and page weight.",
+    "key_points": [
+      "lazy loading definition",
+      "delays non-critical loading",
+      "reduces initial load time",
+      "reduces page weight"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_146",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Discuss the role of a load balancer in a distributed system.",
+    "answer": "A load balancer distributes network or application traffic across multiple servers to enhance responsiveness and availability of applications.",
+    "key_points": [
+      "Traffic distribution",
+      "Multiple servers",
+      "Improve responsiveness",
+      "Boost availability"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_147",
+    "topics": [
+      "back_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "How does indexing improve database query performance?",
+    "answer": "Indexing speeds up data retrieval operations by effectively creating a smaller, faster version of the database table.",
+    "key_points": [
+      "Speeds up data retrieval",
+      "Creates smaller table copy",
+      "Faster table version",
+      "Improves query performance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_148",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain event delegation in JavaScript.",
+    "answer": "Event delegation refers to the practice of using a single event listener to manage all events of a specific type for child elements.",
+    "key_points": [
+      "Single event listener",
+      "Manage child events",
+      "Event delegation definition"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_149",
+    "topics": [
+      "front_end"
+    ],
+    "difficulty": "intermediate",
+    "question": "Explain the concept of 'closure' in JavaScript.",
+    "answer": "A closure is a function that remembers its outer variables and can access them.",
+    "key_points": [
+      "Closure definition",
+      "Remembers outer variables",
+      "Accesses outer variables"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_150",
+    "topics": [
+      "devops"
+    ],
+    "difficulty": "intermediate",
+    "question": "Describe the use of Docker in a DevOps environment.",
+    "answer": "Docker allows for packaging applications in containers, facilitating consistent deployment across different environments.",
+    "key_points": [
+      "Application packaging",
+      "Container usage",
+      "Consistent deployment",
+      "Cross-environment support"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_151",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a distributed key-value store.",
+    "answer": "Focus on data partitioning, replication for fault tolerance, consistency models, and handling node failures.",
+    "key_points": [
+      "Data partitioning",
+      "Fault tolerance replication",
+      "Consistency models",
+      "Node failure handling"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_152",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Implement a function to check if a binary tree is balanced.",
+    "answer": "Use a recursive function to check the height of each subtree; return false if the difference is more than one.",
+    "key_points": [
+      "Recursive function usage",
+      "Subtree height check",
+      "Height difference limit"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_153",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a URL shortening service like bit.ly.",
+    "answer": "Consider efficient hashing, collision resolution, database schema, scalability, and API rate limiting.",
+    "key_points": [
+      "Efficient hashing",
+      "Collision resolution",
+      "Database schema",
+      "Scalability",
+      "API rate limiting"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_154",
+    "topics": [
+      "machine_learning"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a recommendation system for a large e-commerce platform.",
+    "answer": "Use collaborative filtering, content-based filtering, or hybrid methods; consider scalability and real-time processing.",
+    "key_points": [
+      "collaborative filtering",
+      "content-based filtering",
+      "hybrid methods",
+      "scalability consideration",
+      "real-time processing"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_155",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Write an algorithm to find the median of a stream of numbers.",
+    "answer": "Use two heaps (max heap for lower half, min heap for upper half) to maintain the median.",
+    "key_points": [
+      "Two heaps usage",
+      "Max heap for lower half",
+      "Min heap for upper half",
+      "Maintain median"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_156",
+    "topics": [
+      "distributed_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the Raft consensus algorithm.",
+    "answer": "Discuss leader election, log replication, safety, and how Raft achieves consensus in a distributed system.",
+    "key_points": [
+      "Leader election",
+      "Log replication",
+      "Safety property",
+      "Raft consensus"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_157",
+    "topics": [
+      "networking"
+    ],
+    "difficulty": "advanced",
+    "question": "Optimize a global, high-traffic content delivery network.",
+    "answer": "Use strategies like caching, edge locations, load balancing, and optimizing routing and data compression.",
+    "key_points": [
+      "caching strategy",
+      "edge locations",
+      "load balancing",
+      "data compression"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_158",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a chat application that can scale to millions of users.",
+    "answer": "Consider websocket protocol for real-time communication, efficient message broadcasting, and scalable backend architecture.",
+    "key_points": [
+      "Use WebSocket protocol",
+      "Real-time communication",
+      "Efficient broadcasting",
+      "Scalable backend"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_159",
+    "topics": [
+      "low_level_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Implement a garbage collector for a programming language.",
+    "answer": "Understand memory management concepts like mark-and-sweep, reference counting, and generational collection.",
+    "key_points": [
+      "Mark-and-sweep",
+      "Reference counting",
+      "Generational collection",
+      "Memory management"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_160",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a scalable notification system for a social network.",
+    "answer": "Focus on system architecture, push vs. pull models, handling peak loads, database optimization, and message queuing.",
+    "key_points": [
+      "System architecture",
+      "Push vs pull models",
+      "Peak load handling",
+      "Database optimization",
+      "Message queuing"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_161",
+    "topics": [
+      "networking"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain the workings of the TCP protocol for a low-latency network.",
+    "answer": "Focus on the three-way handshake, congestion control (like TCP Fast Open, and CUBIC), and optimizing for reduced latency.",
+    "key_points": [
+      "Three-way handshake",
+      "TCP congestion control",
+      "Latency optimization"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_162",
+    "topics": [
+      "data_structures"
+    ],
+    "difficulty": "advanced",
+    "question": "Design and implement a concurrent hash map.",
+    "answer": "Implement with fine-grained locking or lock-free techniques to ensure thread safety and high concurrency.",
+    "key_points": [
+      "fine-grained locking",
+      "lock-free techniques",
+      "thread safety",
+      "high concurrency"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_163",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Find the Kth largest element in a stream of numbers.",
+    "answer": "Utilize a min-heap to keep track of the K largest elements, ensuring efficient insertion and extraction.",
+    "key_points": [
+      "min-heap utilization",
+      "track K largest elements",
+      "efficient insertion",
+      "efficient extraction"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_164",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Implement Google's PageRank algorithm.",
+    "answer": "Use graph-based algorithms focusing on eigenvector calculation and iterative approaches.",
+    "key_points": [
+      "Graph-based algorithms",
+      "Eigenvector calculation",
+      "Iterative approaches"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_165",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design an API rate limiter for a web service.",
+    "answer": "Use token bucket or leaky bucket algorithms, consider distributed storage for scalability.",
+    "key_points": [
+      "Token bucket algorithm",
+      "Leaky bucket algorithm",
+      "Distributed storage",
+      "Scalability consideration"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_166",
+    "topics": [
+      "database_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Optimize database queries for a high-traffic website.",
+    "answer": "Focus on indexing, query optimization, using caching, database sharding, and efficient schema design.",
+    "key_points": [
+      "Indexing",
+      "Query optimization",
+      "Caching usage",
+      "Database sharding",
+      "Efficient schema design"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_167",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "advanced",
+    "question": "Create a secure and scalable authentication system for a web application.",
+    "answer": "Implement OAuth for third-party integrations, use JWT for stateless authentication, and ensure protection against common security vulnerabilities.",
+    "key_points": [
+      "Implement OAuth",
+      "Use JWT for auth",
+      "Prevent vulnerabilities"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_168",
+    "topics": [
+      "database_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a system for efficient storage and retrieval of large-scale time-series data.",
+    "answer": "Optimize for write-heavy loads, use time-based partitioning, efficient indexing, and consider data compression techniques.",
+    "key_points": [
+      "Optimize write-heavy loads",
+      "Time-based partitioning",
+      "Efficient indexing",
+      "Data compression techniques"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_169",
+    "topics": [
+      "distributed_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Explain how a blockchain works and how to implement one.",
+    "answer": "Focus on cryptographic hashing, decentralized consensus algorithms (like Proof of Work), and the maintenance of a distributed ledger.",
+    "key_points": [
+      "cryptographic hashing",
+      "decentralized consensus",
+      "distributed ledger maintenance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_170",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design an efficient parking lot management system.",
+    "answer": "Use object-oriented design principles, focus on efficiently handling different vehicle sizes, and optimizing space usage.",
+    "key_points": [
+      "object-oriented design",
+      "handle vehicle sizes",
+      "optimize space usage"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_171",
+    "topics": [
+      "machine_learning"
+    ],
+    "difficulty": "advanced",
+    "question": "Develop a machine learning model to predict stock prices.",
+    "answer": "Consider time series analysis, regression models, and reinforcement learning; pay attention to features and data preprocessing.",
+    "key_points": [
+      "Time series analysis",
+      "Regression models",
+      "Reinforcement learning",
+      "Data preprocessing",
+      "Feature engineering"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_172",
+    "topics": [
+      "low_level_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Write a custom memory allocator for a C++ application.",
+    "answer": "Discuss memory pool allocation, handling fragmentation, and optimizing for allocation/deallocation speed.",
+    "key_points": [
+      "Memory pool allocation",
+      "Fragmentation handling",
+      "Allocation speed optimization",
+      "Deallocation speed optimization"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_173",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a real-time multiplayer online game architecture.",
+    "answer": "Focus on handling high network traffic, efficient state synchronization, latency reduction, and scalability.",
+    "key_points": [
+      "high traffic handling",
+      "state synchronization",
+      "latency reduction",
+      "scalability"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_174",
+    "topics": [
+      "distributed_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Implement a distributed file system.",
+    "answer": "Address challenges in data distribution, replication, fault tolerance, consistency, and performance.",
+    "key_points": [
+      "Data distribution",
+      "Replication",
+      "Fault tolerance",
+      "Consistency",
+      "Performance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_175",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Optimize a search algorithm for a large dataset in a distributed environment.",
+    "answer": "Implement distributed searching algorithms like MapReduce for scalability and efficiency.",
+    "key_points": [
+      "distributed searching",
+      "MapReduce algorithm",
+      "scalability improvement",
+      "efficiency improvement"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_176",
+    "topics": [
+      "data_engineering"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a data pipeline for processing big data in real-time.",
+    "answer": "Utilize stream processing frameworks (like Apache Kafka, Spark Streaming), ensure fault tolerance, and manage backpressure.",
+    "key_points": [
+      "stream processing frameworks",
+      "fault tolerance",
+      "backpressure management"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_177",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Build a high-frequency trading system and discuss its components.",
+    "answer": "Focus on low latency, high throughput, reliable data feeds, order execution systems, and concurrent algorithms.",
+    "key_points": [
+      "low latency focus",
+      "high throughput",
+      "reliable data feeds",
+      "order execution systems",
+      "concurrent algorithms"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_178",
+    "topics": [
+      "machine_learning"
+    ],
+    "difficulty": "advanced",
+    "question": "Develop a deep learning model to analyze and interpret medical images.",
+    "answer": "Use convolutional neural networks, pay attention to dataset quality and preprocessing, and handle class imbalances.",
+    "key_points": [
+      "Use CNN models",
+      "Dataset quality",
+      "Dataset preprocessing",
+      "Class imbalance handling"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_179",
+    "topics": [
+      "artificial_intelligence"
+    ],
+    "difficulty": "advanced",
+    "question": "Create an AI that can play a complex board game at a competitive level.",
+    "answer": "Implement advanced AI techniques like Monte Carlo Tree Search, deep learning, and reinforcement learning.",
+    "key_points": [
+      "Monte Carlo Tree Search",
+      "deep learning",
+      "reinforcement learning",
+      "advanced AI techniques"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_180",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a fraud detection system for online transactions.",
+    "answer": "Use machine learning for anomaly detection, implement rule-based systems for known fraud patterns, ensure real-time processing.",
+    "key_points": [
+      "ML for anomaly detection",
+      "rule-based fraud detection",
+      "real-time processing requirement"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_181",
+    "topics": [
+      "distributed_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Implement a distributed graph processing framework.",
+    "answer": "Discuss vertex-centric computation, message passing between nodes, and optimizations for large-scale processing.",
+    "key_points": [
+      "Vertex-centric computation",
+      "Node message passing",
+      "Large-scale optimization"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_182",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a global video streaming service like Netflix.",
+    "answer": "Focus on CDN usage, adaptive bitrate streaming, content caching strategies, and handling peak traffic loads.",
+    "key_points": [
+      "CDN usage",
+      "adaptive bitrate streaming",
+      "content caching strategies",
+      "peak traffic handling"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_183",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Create a system to efficiently match job seekers with job postings.",
+    "answer": "Use NLP for parsing resumes, implement ranking algorithms, and optimize for search and matching efficiency.",
+    "key_points": [
+      "NLP resume parsing",
+      "ranking algorithm implementation",
+      "search efficiency optimization",
+      "matching efficiency optimization"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_184",
+    "topics": [
+      "distributed_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Design and implement a large-scale distributed cache system.",
+    "answer": "Consider consistency, data partitioning, eviction policies, and fault tolerance in distributed caching.",
+    "key_points": [
+      "consistency",
+      "data partitioning",
+      "eviction policies",
+      "fault tolerance"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_185",
+    "topics": [
+      "networking"
+    ],
+    "difficulty": "advanced",
+    "question": "Optimize network protocols for a satellite communication system.",
+    "answer": "Address latency, data loss, and bandwidth issues; optimize for long-distance and high-latency networks.",
+    "key_points": [
+      "Address latency issue",
+      "Handle data loss",
+      "Optimize bandwidth",
+      "Optimize long-distance networks"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_186",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Develop an autonomous vehicle's path planning algorithm.",
+    "answer": "Implement algorithms considering real-time obstacle avoidance, dynamic path adjustments, and efficient routing.",
+    "key_points": [
+      "real-time obstacle avoidance",
+      "dynamic path adjustments",
+      "efficient routing"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_187",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a scalable and reliable messaging system for a large corporation.",
+    "answer": "Utilize message queues (like Kafka, RabbitMQ), ensure fault tolerance, and implement load balancing.",
+    "key_points": [
+      "message queues usage",
+      "fault tolerance guarantee",
+      "load balancing implementation"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_188",
+    "topics": [
+      "machine_learning"
+    ],
+    "difficulty": "advanced",
+    "question": "Implement a natural language processing algorithm to understand and answer user queries.",
+    "answer": "Use NLP techniques like tokenization, parsing, and deep learning models for understanding and generating responses.",
+    "key_points": [
+      "NLP techniques usage",
+      "tokenization application",
+      "parsing application",
+      "deep learning models use"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_189",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Create an efficient algorithm for real-time anomaly detection in network traffic.",
+    "answer": "Implement statistical models or machine learning algorithms to detect unusual patterns indicative of anomalies.",
+    "key_points": [
+      "Anomaly detection",
+      "Statistical models",
+      "ML algorithms",
+      "Unusual pattern detection"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_190",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a system to manage and process Internet of Things (IoT) data.",
+    "answer": "Focus on handling large-scale data influx, real-time processing, data storage, and analytics.",
+    "key_points": [
+      "Large-scale data handling",
+      "Real-time processing",
+      "Data storage",
+      "Data analytics"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_191",
+    "topics": [
+      "low_level_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Build a compiler for a new programming language.",
+    "answer": "Discuss lexical analysis, parsing, syntax tree generation, semantic analysis, and code generation.",
+    "key_points": [
+      "Lexical analysis",
+      "Parsing",
+      "Syntax tree generation",
+      "Semantic analysis",
+      "Code generation"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_192",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Implement a robust text editor with features like auto-complete and syntax highlighting.",
+    "answer": "Consider efficient data structures for text storage (like gap buffers), and algorithms for syntax parsing.",
+    "key_points": [
+      "Efficient data structures",
+      "Gap buffer storage",
+      "Syntax parsing algorithms"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_193",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a scalable infrastructure for an online advertising platform.",
+    "answer": "Focus on handling high-volume traffic, data analytics, ad targeting algorithms, and ensuring low-latency responses.",
+    "key_points": [
+      "High-volume traffic handling",
+      "Data analytics",
+      "Ad targeting algorithms",
+      "Low-latency response"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_194",
+    "topics": [
+      "machine_learning"
+    ],
+    "difficulty": "advanced",
+    "question": "Develop a machine learning algorithm to detect fake news on social media.",
+    "answer": "Use NLP for text analysis, implement classification algorithms, and consider the challenge of unstructured data.",
+    "key_points": [
+      "NLP text analysis",
+      "classification algorithms",
+      "unstructured data challenge"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_195",
+    "topics": [
+      "database_systems"
+    ],
+    "difficulty": "advanced",
+    "question": "Optimize an SQL database for a high-volume financial transaction system.",
+    "answer": "Focus on transaction isolation levels, indexing strategies, query optimization, and database sharding.",
+    "key_points": [
+      "transaction isolation levels",
+      "indexing strategies",
+      "query optimization",
+      "database sharding"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_196",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a cloud-based virtual desktop infrastructure.",
+    "answer": "Address virtualization technologies, resource allocation, security, and remote access protocols.",
+    "key_points": [
+      "Address virtualization",
+      "Resource allocation",
+      "Security considerations",
+      "Remote access protocols"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_197",
+    "topics": [
+      "data_engineering"
+    ],
+    "difficulty": "advanced",
+    "question": "Create a real-time sports analytics system using sensor data.",
+    "answer": "Utilize streaming data processing, machine learning for pattern recognition, and efficient data storage solutions.",
+    "key_points": [
+      "Streaming data processing",
+      "ML pattern recognition",
+      "Efficient data storage"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_198",
+    "topics": [
+      "algorithms"
+    ],
+    "difficulty": "advanced",
+    "question": "Implement a quantum algorithm for solving a well-known computational problem.",
+    "answer": "Discuss quantum computing principles, qubit manipulation, and specific algorithms like Grover's or Shor's algorithm.",
+    "key_points": [
+      "Quantum computing principles",
+      "Qubit manipulation",
+      "Grover's algorithm",
+      "Shor's algorithm"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_199",
+    "topics": [
+      "security"
+    ],
+    "difficulty": "advanced",
+    "question": "Design a secure mobile payment system for developing countries.",
+    "answer": "Focus on security protocols, offline capabilities, user authentication, and low-resource optimizations.",
+    "key_points": [
+      "Security protocols",
+      "Offline capabilities",
+      "User authentication",
+      "Low-resource optimizations"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  },
+  {
+    "id": "q_200",
+    "topics": [
+      "system_design"
+    ],
+    "difficulty": "advanced",
+    "question": "Build a scalable image processing pipeline for a photo-sharing app.",
+    "answer": "Implement distributed processing, efficient storage, and consider ML techniques for feature extraction.",
+    "key_points": [
+      "Distributed processing",
+      "Efficient storage",
+      "ML feature extraction"
+    ],
+    "tags": [],
+    "source": "Kaggle Software Engineering Interview Questions Dataset"
+  }
 ]
