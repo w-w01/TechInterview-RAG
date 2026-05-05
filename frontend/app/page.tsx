@@ -107,6 +107,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          question_id: questionPayload.question_id,
           question: questionPayload.question,
           student_answer: answer,
           topic: questionPayload.topic,

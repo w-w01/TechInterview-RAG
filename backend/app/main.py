@@ -4,7 +4,7 @@ import json
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -69,6 +69,22 @@ def _snippet_from_item(it: Dict[str, Any]) -> ReferenceSnippet:
     return ReferenceSnippet(source=src, content=body[:4000])
 
 
+def _item_by_id(question_id: str) -> Optional[Dict[str, Any]]:
+    """按种子 id 查找条目。"""
+    for it in _seed_items:
+        if str(it.get("id", "")) == str(question_id):
+            return it
+    return None
+
+
+def _extend_key_points_union(target: List[str], item: Dict[str, Any]) -> None:
+    kp = item.get("key_points") or []
+    if isinstance(kp, list):
+        target.extend(str(x) for x in kp)
+    elif kp:
+        target.append(str(kp))
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
     return HealthResponse(
@@ -130,20 +146,36 @@ async def evaluate_answer(body: EvaluateAnswerRequest) -> EvaluateAnswerResponse
             detail=f"difficulty 必须是以下之一: {', '.join(sorted(ALLOWED_DIFFICULTY))}",
         )
 
-    query_text = f"{body.question}\n\n考生作答:\n{body.student_answer}"
-    retrieved = await rag.retrieve(query_text=query_text, topic=body.topic, top_k=5)
-    if not retrieved:
-        raise HTTPException(status_code=500, detail="检索未返回任何参考条目")
+    canonical = _item_by_id(body.question_id)
+    if canonical is None:
+        raise HTTPException(status_code=404, detail="未知的 question_id，不在当前题库中。")
+    if str(canonical.get("topic", "")).strip() != body.topic.strip():
+        raise HTTPException(status_code=400, detail="question_id 与 topic 不一致。")
+    if str(canonical.get("difficulty", "")).strip() != body.difficulty.strip():
+        raise HTTPException(status_code=400, detail="question_id 与 difficulty 不一致。")
+    if str(canonical.get("question", "")).strip() != body.question.strip():
+        raise HTTPException(status_code=400, detail="question 与题库中该 id 对应题干不一致。")
 
-    ref_lines = []
-    key_points_union: List[str] = []
-    evidence: List[ReferenceSnippet] = []
+    query_text = f"{body.question}\n\n考生作答:\n{body.student_answer}"
+    retrieved = await rag.retrieve(query_text=query_text, topic=body.topic, top_k=8)
+
+    # 当前题优先；其余为向量近邻，最多共 5 条用于展示与拼 prompt
+    ordered: List[Dict[str, Any]] = [canonical]
+    seen = {str(canonical.get("id", ""))}
     for it in retrieved:
-        ref_lines.append(_snippet_from_item(it).content)
-        kp = it.get("key_points") or []
-        if isinstance(kp, list):
-            key_points_union.extend(str(x) for x in kp)
-        evidence.append(_snippet_from_item(it))
+        iid = str(it.get("id", ""))
+        if iid in seen:
+            continue
+        seen.add(iid)
+        ordered.append(it)
+        if len(ordered) >= 5:
+            break
+
+    ref_lines = [_snippet_from_item(it).content for it in ordered]
+    key_points_union: List[str] = []
+    for it in ordered:
+        _extend_key_points_union(key_points_union, it)
+    evidence = [_snippet_from_item(it) for it in ordered]
 
     reference_block = "\n\n---\n\n".join(ref_lines)
     key_points_block = "\n".join(f"- {p}" for p in key_points_union[:30])

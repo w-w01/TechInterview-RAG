@@ -27,6 +27,9 @@ class GenerateQuestionResponse(BaseModel):
 
 
 class EvaluateAnswerRequest(BaseModel):
+    """评卷须携带出题接口返回的 question_id，用于锚定题库条目与引用证据。"""
+
+    question_id: str = Field(..., description="与种子条目中 id 一致，通常来自 /generate-question")
     question: str
     student_answer: str
     topic: str

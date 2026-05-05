@@ -14,14 +14,15 @@
 
 ## 答案评估如何工作
 
-1. 用上述检索得到若干条参考 QA，拼成 `reference_block`，并把检索条目的 `key_points` 合并为 `key_points_block`。
-2. 使用 `prompts.EVALUATION_SYSTEM_PROMPT` 定义 rubric 与输出 JSON 字段约束。
-3. 调用 `gpt-4o-mini`，`response_format=json_object`，服务端解析并校验 `score` 在 0–10。
+1. 请求必须携带 **`question_id`**：服务端用其在种子中定位**当前题**（canonical），并校验与 `topic`、`difficulty`、`question` 文本一致。
+2. 向量检索仍以「题干 + 考生答案」为查询，取近邻条目；与 canonical **按 id 去重合并**，最多 5 条，**canonical 始终排在首位**，拼成 `reference_block` 与合并后的 `key_points_block`。
+3. 使用 `prompts.EVALUATION_SYSTEM_PROMPT` 定义 rubric 与输出 JSON 字段约束。
+4. 调用 `gpt-4o-mini`，`response_format=json_object`，服务端解析并校验 `score` 在 0–10。
 
 ## 引用 / 证据如何产生
 
 - **出题接口**：`reference_snippets` 固定为空列表；题目来自种子过滤后的随机抽取。
-- **评卷接口**：`reference_evidence` 为检索到的条目同样格式化后的列表，供前端展示「引用证据」。
+- **评卷接口**：`reference_evidence` 与 prompt 共用上述合并列表（**首条为当前题**，其余为近邻），供前端展示「引用证据」。
 
 ## 后续可改进方向
 
