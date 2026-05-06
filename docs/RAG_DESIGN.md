@@ -33,7 +33,7 @@
 4. **Planner（LLM）**：读取 JD 与 **topic 白名单**（`topic_allowlist.json`），只输出 JSON：`topic_priority`（合法 slug 数组，高→低）与 `notes`。若模型未给出合法 slug，则 **程序回退** 为「候选频次 + 会话弱点加权」排序（与旧规则一致，保证可组卷）。
 5. **候选送给 Selector**：按 Planner 的 topic 顺序从检索结果中 **分层抽样**（每 topic 条数上限、总条数上限见环境变量 `JD_CANDIDATE_PER_TOPIC`、`JD_SELECTOR_MAX_ITEMS`），每条含 `question_id`、题干、`topics`、难度、`key_points_preview`（缩短要点，省 token）。
 6. **Selector（LLM）**：在提示中注入 JD 摘要、topic 优先级、**真题道数 / AI 道数**、单 topic 真题上限、会话薄弱词、最近卷 **topic 推荐难度**（`topic_level_plan`），以及候选 JSON。**输出**仅允许使用候选中的 `question_id`；并输出 `ai_slots`（每道含 `topics` + `difficulty`），供后续 AI 出题。
-7. **程序校验**：剔除非法 id、去重、按单 topic 上限过滤与 **不足补齐**；规范 `ai_slots` 条数后，对每槽按标签与难度从池中 **少样本抽样** 调用既有 AI 出题逻辑，生成 `generation_id` 题。
+7. **程序校验**：剔除非法 id、去重、按单 topic 上限过滤与 **不足补齐**；若 Selector 首次 JSON 未满足「真题 id 全在候选内、无重复、条数严格等于要求、ai_slots 长度严格等于要求」，则 **附带校验错误说明与合法 id 节选再调用 Selector 一次**；仍不足则由程序在 `program_fixes` 中记录并补齐。规范 `ai_slots` 条数后，对每槽按标签与难度从池中 **少样本抽样** 调用既有 AI 出题逻辑，生成 `generation_id` 题。
 8. **混卷与解释**：响应 `questions`（真题 + AI 题交错）与 `meta`（含 `planner_notes`、`selector_notes`、`selector_candidate_count`、`program_fixes`、原 AI 占比与自适应字段等）。
 9. **试卷实体化**：若提供 `session_id`，创建 `paper_id` 并写入 `attempts`。
 10. **去重**：同会话已评估（`score != null`）的真题与题干 key 不参与新卷；AI 题重复题干会重试或真题补位。
@@ -59,6 +59,11 @@
 - **`/generate-question`**：`reference_snippets` 固定为空列表。
 - **`/generate-question-llm`**：`reference_snippets` 为本次少样本抽样的种子片段。
 - **`/evaluate-answer`**：真题 `reference_evidence` 为 **单条** canonical；AI 题为 **多条** 抽样种子片段（零样本时可为空列表）。
+
+## `GET /sessions/{id}/next-paper-plan` 与 topic_priority 来源
+
+- 响应中 **`topic_priority`**：优先取自**本会话最近一张试卷**的 `meta.topic_priority`（JD 组卷卷 `source=jd_rag_mix` 时，与当次 Planner/程序回退一致）；若无则用题库前 120 条 + 弱点计数的 **stub 排序**。
+- **`topic_priority_source`**：`last_paper_meta` 或 `seed_frequency_weakness_stub`；**`topic_priority_explanation`** 为中文说明。本条接口**不调用** JD Planner LLM，调试时勿与 `POST /generate-paper-from-jd` 的实时 Planner 混为一谈。
 
 ## 健康检查字段说明
 

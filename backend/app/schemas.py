@@ -121,10 +121,69 @@ class EvaluateAnswerResponse(BaseModel):
         default_factory=list,
         description="评卷识别出的薄弱知识点，用于后续补弱出题。",
     )
+    study_topics: List[str] = Field(
+        default_factory=list,
+        description="后续学习与 Tutor 建议方向（中文短句）。",
+    )
     reference_evidence: List[ReferenceSnippet] = Field(
         ...,
         description="真题为单条 canonical；AI 题可为多条种子参考片段。",
     )
+
+
+# --- AI Tutor（学习计划与对话） ---
+
+
+class TutorLearningPlanRequest(BaseModel):
+    jd_text: str = Field(..., min_length=40)
+    weak_topic: str = ""
+    plan_days: int = Field(
+        5,
+        ge=1,
+        le=14,
+        description="用户希望多少天内完成本计划；模型输出的 days 长度须与此一致。",
+    )
+
+
+class TutorPlanTask(BaseModel):
+    task: str
+    estimated_minutes: int = Field(..., ge=5, le=240)
+
+
+class TutorPlanDay(BaseModel):
+    day: int = Field(..., ge=1)
+    focus: str
+    tasks: List[TutorPlanTask]
+
+
+class TutorLearningPlanResponse(BaseModel):
+    plan_title: str
+    jd_priority_guess_markdown: str = Field(
+        ...,
+        description="基于 JD 的侧重点与考查重心推断（Markdown）。",
+    )
+    days: List[TutorPlanDay]
+    tips: List[str]
+
+
+class TutorChatTurn(BaseModel):
+    role: str = Field(..., description="user 或 assistant")
+    content: str
+
+
+class TutorChatRequest(BaseModel):
+    jd_text: str = Field("", description="可为空；空则提示词中标注未提供 JD。")
+    weak_topic: str = ""
+    history: List[TutorChatTurn] = Field(
+        default_factory=list,
+        description="不含本轮用户消息的既往对话。",
+    )
+    user_message: str = Field(..., min_length=1)
+
+
+class TutorChatResponse(BaseModel):
+    reply_markdown: str
+    suggested_followups: List[str] = Field(default_factory=list)
 
 
 class GeneratePaperFromJdRequest(BaseModel):
@@ -266,6 +325,14 @@ class NextPaperPlanResponse(BaseModel):
     session_id: str
     baseline_window: int
     topic_priority: List[str] = Field(default_factory=list)
+    topic_priority_source: str = Field(
+        "",
+        description="last_paper_meta | seed_frequency_weakness_stub，见 topic_priority_explanation。",
+    )
+    topic_priority_explanation: str = Field(
+        "",
+        description="人类可读：topic_priority 来自上一张卷 meta 还是题库 stub，避免与 JD Planner 混淆。",
+    )
     topic_baseline: dict[str, Any] = Field(default_factory=dict)
     recommended_difficulty_by_topic: dict[str, str] = Field(default_factory=dict)
     reasons: List[str] = Field(default_factory=list)

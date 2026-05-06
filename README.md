@@ -1,8 +1,10 @@
 # InterviewMate RAG
 
-面向简历演示的**本地题库面试练习 MVP**：FastAPI + Next.js，出题支持 **真题（种子随机）** 与 **AI 生成题（结构化池少样本）**；评卷均为 **LLM rubric**。真题评卷锚定 **`question_id`**；AI 题锚定 **`generation_id`** 快照 + 抽样种子参考片段。**练习会话**：`POST /sessions`，出题可带 `session_id` 记录尝试（进程内存储，单实例）。
+面向简历演示的**本地题库面试练习 MVP**：FastAPI + Next.js，出题支持 **真题（种子随机）** 与 **AI 生成题（结构化池少样本）**；评卷均为 **LLM rubric**。真题评卷锚定 **`question_id`**；AI 题锚定 **`generation_id`** 快照 + 抽样种子参考片段。**练习会话**：`POST /sessions`，出题可带 `session_id`；会话与试卷记录存本地 **SQLite**（题库仍为 JSON 种子）。
 
-**当前已实现**：`/generate-question`、`/generate-question-llm`、`/generate-paper-from-jd`（JD **向量检索候选** + **LLM Planner** 白名单 topic 优先级 + **LLM Selector** 仅从候选 id 选题并规划 AI 槽位）、`/evaluate-answer`、`/sessions`。**启动时**对全库种子调用 `text-embedding-3-small` 建索引（需外网与 Key）。**评卷**仍为 **本题 canonical / AI 快照**，不把 JD 全文或检索邻居写入评卷 prompt。
+**当前已实现**：`/generate-question`、`/generate-question-llm`、`/generate-paper-from-jd`（JD **向量检索候选** + **LLM Planner** 白名单 topic 优先级 + **LLM Selector** 仅从候选 id 选题并规划 AI 槽位）、`/evaluate-answer`（含 **`study_topics`** 建议学习方向）、`/sessions`、**AI Tutor**：`POST /sessions/{id}/tutor/learning-plan`（含 **`plan_days`** 与 JD **侧重点推断** `jd_priority_guess_markdown`）、`/tutor/chat`。**启动时**对全库种子调用 `text-embedding-3-small` 建索引（需外网与 Key）。**评卷**仍为 **本题 canonical / AI 快照**，不把 JD 全文或检索邻居写入评卷 prompt。
+
+**限流**：本仓库为**个人本地演示**，服务端**不实现** API 限流；若对外暴露请自行在网关或托管平台配置。
 
 **路线图**：[docs/ROADMAP.md](docs/ROADMAP.md)（阶段 3 规则自适应与阶段 4 AI tutor 规划）。
 
@@ -155,7 +157,29 @@ Content-Type: application/json
 }
 ```
 
-真题：响应中的 **`reference_evidence`** 为 **单条** canonical。AI 题：可为 **多条** 抽样种子片段。**JD 组卷已实现**，评卷仍按单题 canonical / AI 快照逻辑，不并入向量邻居。
+真题：响应中的 **`reference_evidence`** 为 **单条** canonical。AI 题：可为 **多条** 抽样种子片段。**JD 组卷已实现**，评卷仍按单题 canonical / AI 快照逻辑，不并入向量邻居。评卷 JSON 另含 **`study_topics`**（字符串数组），用于前端展示与「学习」页 Tutor 衔接。
+
+**AI Tutor（需有效 `session_id`）**
+
+学习计划（`jd_text` 不少于约 40 字；`weak_topic` 可空；**`plan_days`** 为 1–14，表示希望几天内完成；响应含 **`jd_priority_guess_markdown`**，为基于 JD 的考查侧重点推断，**非**简单罗列技术栈）：
+
+```http
+POST http://127.0.0.1:8000/sessions/{session_id}/tutor/learning-plan
+Content-Type: application/json
+
+{"jd_text": "……", "weak_topic": "", "plan_days": 5}
+```
+
+对话（`history` 为不含本轮的既往 `user`/`assistant` 消息；`jd_text` 可空）：
+
+```http
+POST http://127.0.0.1:8000/sessions/{session_id}/tutor/chat
+Content-Type: application/json
+
+{"jd_text": "", "weak_topic": "", "history": [], "user_message": "什么是 CAS？"}
+```
+
+前端首页顶栏可切换 **答题** / **学习**（学习计划可选天数）；**个人后台**不在本 MVP 中展示或开发。
 
 ## 文档
 
@@ -163,7 +187,6 @@ Content-Type: application/json
 - [docs/MVP_SCOPE.md](docs/MVP_SCOPE.md) — 目标、范围、非目标、局限
 - [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md) — 数据加载、选题与评卷、JD RAG 组卷（已实现）
 - [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) — 题库 JSON 字段与白名单
-- 阶段 4 当前仅输出 AI tutor 规划文档，暂不开发页面与对话。
 
 ## 截图
 

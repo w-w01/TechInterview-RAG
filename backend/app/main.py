@@ -22,10 +22,14 @@ from .prompts import (
     GENERATION_SYSTEM_PROMPT,
     JD_PLANNER_SYSTEM_PROMPT,
     JD_SELECTOR_SYSTEM_PROMPT,
+    TUTOR_CHAT_SYSTEM,
+    TUTOR_LEARNING_PLAN_SYSTEM,
     build_evaluation_user_prompt,
     build_generation_user_prompt,
     build_jd_planner_user_prompt,
     build_jd_selector_user_prompt,
+    build_tutor_chat_user,
+    build_tutor_learning_plan_user,
 )
 from .rag import RAGService, _item_topic_slugs
 from .schemas import (
@@ -48,8 +52,15 @@ from .schemas import (
     SessionDetailResponse,
     TopicEntry,
     TopicsListResponse,
+    TutorChatRequest,
+    TutorChatResponse,
+    TutorLearningPlanRequest,
+    TutorLearningPlanResponse,
+    TutorPlanDay,
+    TutorPlanTask,
 )
 from .session_store import (
+    PracticeSession,
     append_attempt,
     create_paper,
     create_session,
@@ -515,12 +526,33 @@ async def get_next_paper_plan(session_id: str) -> NextPaperPlanResponse:
     topic_baseline = get_topic_baseline(sid, baseline_window)
     weakness = dict(sess.weakness_counts)
     topic_priority: List[str] = []
+    topic_priority_source = ""
+    topic_priority_explanation = ""
     if sess.papers:
         last_meta = sess.papers[-1].get("meta") or {}
-        topic_priority = [str(x) for x in (last_meta.get("topic_priority") or [])]
+        tp_from_meta = [str(x) for x in (last_meta.get("topic_priority") or [])]
+        if tp_from_meta:
+            topic_priority = tp_from_meta
+            topic_priority_source = "last_paper_meta"
+            last_src = str(sess.papers[-1].get("source") or "")
+            if last_src == "jd_rag_mix":
+                topic_priority_explanation = (
+                    "来自本会话最近一张试卷的 meta.topic_priority（JD 组卷，与当次 "
+                    "Planner 或程序回退排序一致；本条接口不调用 LLM）。"
+                )
+            else:
+                topic_priority_explanation = (
+                    "来自本会话最近一张试卷的 meta.topic_priority（非 jd_rag_mix 时与 "
+                    "JD Planner 无必然对应，仅供参考）。"
+                )
     if not topic_priority:
         ranked_stub = _seed_items[:120] if _seed_items else []
         topic_priority = _topic_priority_from_ranked(ranked_stub, weakness)
+        topic_priority_source = "seed_frequency_weakness_stub"
+        topic_priority_explanation = (
+            "上一张卷无可用 topic_priority；已用题库前 120 条结合弱点计数近似排序，"
+            "与 POST /generate-paper-from-jd 当次 LLM Planner 无直接对应，仅供调试。"
+        )
     rec_map, reasons = _recommended_difficulty_by_topic(topic_baseline)
     if not reasons:
         reasons.append("暂无连续偏离，维持主难度并保留随机性")
@@ -528,6 +560,8 @@ async def get_next_paper_plan(session_id: str) -> NextPaperPlanResponse:
         session_id=sid,
         baseline_window=baseline_window,
         topic_priority=topic_priority,
+        topic_priority_source=topic_priority_source,
+        topic_priority_explanation=topic_priority_explanation,
         topic_baseline=topic_baseline,
         recommended_difficulty_by_topic=rec_map,
         reasons=reasons,
@@ -774,6 +808,40 @@ async def _jd_run_topic_planner(jd_text: str) -> Tuple[List[str], List[str]]:
     ) from last_err
 
 
+def _jd_selector_validation_issues(
+    selected_ids: List[str],
+    raw_ai_slots_len: int,
+    valid_ids: Set[str],
+    seed_count: int,
+    ai_count: int,
+) -> List[str]:
+    """Selector 首次输出严格校验，未通过则拼接为重选提示。"""
+    issues: List[str] = []
+    bad = [i for i in selected_ids if i and i not in valid_ids]
+    if bad:
+        issues.append(f"下列 id 不在候选 question_id 中，禁止输出：{bad[:20]}")
+    seen: Set[str] = set()
+    dup: Set[str] = set()
+    for i in selected_ids:
+        if not i:
+            continue
+        if i in seen:
+            dup.add(i)
+        seen.add(i)
+    if dup:
+        issues.append(f"selected_seed_ids 含重复 id：{sorted(dup)}")
+    good = [i for i in selected_ids if i in valid_ids]
+    if len(good) != seed_count:
+        issues.append(
+            f"selected_seed_ids 在候选内有效 id 应为 {seed_count} 个，当前有效 {len(good)} 个（你共输出 {len(selected_ids)} 个）。"
+        )
+    if raw_ai_slots_len != ai_count:
+        issues.append(
+            f"ai_slots 数组长度应为 {ai_count}，当前为 {raw_ai_slots_len}（须每项为含 topics、difficulty 的对象）。"
+        )
+    return issues
+
+
 async def _jd_run_paper_selector(
     *,
     jd_excerpt: str,
@@ -785,8 +853,9 @@ async def _jd_run_paper_selector(
     weak_topics: List[str],
     recommended_by_topic: Dict[str, str],
     candidate_rows: List[Dict[str, Any]],
-) -> Tuple[List[str], List[Dict[str, Any]], str]:
-    """Selector：仅允许选择候选中的 question_id，并规划 AI 槽位。"""
+    repair_hint: Optional[str] = None,
+) -> Tuple[List[str], List[Dict[str, Any]], str, int]:
+    """Selector：仅允许选择候选中的 question_id，并规划 AI 槽位。返回原始 ai_slots 数组长度供校验。"""
     rec_json = json.dumps(recommended_by_topic, ensure_ascii=False)
     cand_json = json.dumps(candidate_rows, ensure_ascii=False)
     user_prompt = build_jd_selector_user_prompt(
@@ -800,6 +869,8 @@ async def _jd_run_paper_selector(
         recommended_by_topic_json=rec_json,
         candidates_json=cand_json,
     )
+    if repair_hint:
+        user_prompt += "\n\n【上次输出未通过校验，请按下列要求修正后重新输出完整 JSON】\n" + repair_hint
     last_err: Optional[Exception] = None
     for _ in range(2):
         try:
@@ -815,7 +886,10 @@ async def _jd_run_paper_selector(
             raw = completion.choices[0].message.content or "{}"
             data = json.loads(raw)
             ids = [str(x).strip() for x in (data.get("selected_seed_ids") or [])]
-            slots_raw = data.get("ai_slots") or []
+            slots_raw = data.get("ai_slots")
+            if not isinstance(slots_raw, list):
+                slots_raw = []
+            raw_ai_slots_len = len(slots_raw)
             norm_slots: List[Dict[str, Any]] = []
             for s in slots_raw:
                 if not isinstance(s, dict):
@@ -831,7 +905,7 @@ async def _jd_run_paper_selector(
                     d = ""
                 norm_slots.append({"topics": t_list, "difficulty": d})
             notes = str(data.get("notes") or "").strip()
-            return ids, norm_slots, notes
+            return ids, norm_slots, notes, raw_ai_slots_len
         except Exception as e:
             last_err = e
             continue
@@ -1065,7 +1139,8 @@ async def generate_paper_from_jd(
     cand_rows = _jd_candidate_rows_for_selector_json(candidate_items)
     primary_cap_seeds = _jd_primary_topic_cap(seed_count)
     jd_excerpt = jd_trunc[:3500]
-    selected_ids, ai_slots_raw, selector_notes = await _jd_run_paper_selector(
+    valid_sel_ids = set(candidate_by_id.keys())
+    selected_ids, ai_slots_raw, selector_notes, raw_ai_n = await _jd_run_paper_selector(
         jd_excerpt=jd_excerpt,
         topic_priority=topic_priority,
         seed_count=seed_count,
@@ -1076,6 +1151,29 @@ async def generate_paper_from_jd(
         recommended_by_topic=recommended_by_topic,
         candidate_rows=cand_rows,
     )
+    sel_issues = _jd_selector_validation_issues(
+        selected_ids, raw_ai_n, valid_sel_ids, seed_count, ai_count
+    )
+    if sel_issues:
+        sample_ids = sorted(valid_sel_ids)[:48]
+        hint = "\n".join(sel_issues)
+        hint += (
+            f"\n合法 question_id 节选（共 {len(valid_sel_ids)} 个，须从中选取"
+            f" {seed_count} 个且不重复）：{json.dumps(sample_ids, ensure_ascii=False)}"
+        )
+        selected_ids, ai_slots_raw, selector_notes, raw_ai_n = await _jd_run_paper_selector(
+            jd_excerpt=jd_excerpt,
+            topic_priority=topic_priority,
+            seed_count=seed_count,
+            ai_count=ai_count,
+            request_difficulty=body.difficulty,
+            primary_topic_cap=primary_cap_seeds,
+            weak_topics=weak_topics,
+            recommended_by_topic=recommended_by_topic,
+            candidate_rows=cand_rows,
+            repair_hint=hint,
+        )
+        program_fixes.append("Selector 首次输出未过严格校验，已带错误说明重选一次")
     seed_picked = _finalize_seed_picked_from_selector(
         selected_ids,
         candidate_by_id,
@@ -1298,7 +1396,9 @@ def _parse_eval_json(content: str) -> Dict[str, Any]:
     return json.loads(content)
 
 
-def _extract_eval_payload(data: Dict[str, Any]) -> Tuple[int, List[str], List[str], str, List[str]]:
+def _extract_eval_payload(
+    data: Dict[str, Any],
+) -> Tuple[int, List[str], List[str], str, List[str], List[str]]:
     """从评卷 JSON 提取字段并做基本规范化。"""
     try:
         score = int(data["score"])
@@ -1307,13 +1407,149 @@ def _extract_eval_payload(data: Dict[str, Any]) -> Tuple[int, List[str], List[st
         improved = str(data["improved_answer"])
         weak_raw = data.get("weak_topics", [])
         weak_topics = [str(x).strip().lower() for x in list(weak_raw) if str(x).strip()]
+        study_raw = data.get("study_topics", [])
+        study_topics = [str(x).strip() for x in list(study_raw) if str(x).strip()]
     except (KeyError, TypeError, ValueError) as e:
         raise HTTPException(status_code=502, detail=f"模型 JSON 字段不完整: {e}") from e
     if score < 0 or score > 10:
         raise HTTPException(status_code=502, detail="score 必须在 0–10")
     if not improved.strip():
         raise HTTPException(status_code=502, detail="improved_answer 不能为空")
-    return score, strengths, missing, improved, weak_topics
+    return score, strengths, missing, improved, weak_topics, study_topics
+
+
+def _session_baseline_text(sess: PracticeSession) -> str:
+    """会话内薄弱频次与最近作答摘要，供 Tutor 提示词使用。"""
+    parts: List[str] = []
+    if sess.weakness_counts:
+        top = sorted(sess.weakness_counts.items(), key=lambda x: -x[1])[:10]
+        parts.append(
+            "薄弱频次（topic -> 次数）: "
+            + ", ".join(f"{k}:{v}" for k, v in top)
+        )
+    if sess.attempts:
+        last = sess.attempts[-1]
+        topics = last.get("topics") or []
+        parts.append(
+            f"最近一题: 难度 {last.get('difficulty')}, 标签 {','.join(str(t) for t in topics)}, "
+            f"得分 {last.get('score')}"
+        )
+    return "\n".join(parts) if parts else "(尚无练习记录)"
+
+
+def _last_attempt_summary(sess: PracticeSession) -> str:
+    """最近一次题目的题干摘要与薄弱点，可能为空。"""
+    if not sess.attempts:
+        return "(无)"
+    a = sess.attempts[-1]
+    qt = str(a.get("question_text") or "").strip()
+    if len(qt) > 800:
+        qt = qt[:800] + "…"
+    wt = a.get("weak_topics") or []
+    sc = a.get("score")
+    return (
+        f"题干摘要:\n{qt or '(无题干存档)'}\n"
+        f"得分: {sc}\n薄弱: {', '.join(str(x) for x in wt)}"
+    )
+
+
+def _resolve_weak_topic(sess: PracticeSession, weak_topic: str) -> str:
+    w = str(weak_topic or "").strip()
+    if w:
+        return w
+    if sess.weakness_counts:
+        return max(sess.weakness_counts.items(), key=lambda x: x[1])[0]
+    return "通用技术面试基础"
+
+
+async def _run_tutor_json_llm(
+    *, system: str, user: str, temperature: float = 0.35
+) -> Dict[str, Any]:
+    """Tutor 类接口：JSON 输出。"""
+    model = "gpt-4o-mini"
+    completion = await _get_openai().chat.completions.create(
+        model=model,
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        temperature=temperature,
+    )
+    raw = completion.choices[0].message.content or "{}"
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=502, detail=f"模型返回非合法 JSON: {e}") from e
+
+
+def _extract_learning_plan_payload(
+    data: Dict[str, Any],
+    *,
+    expected_days: int,
+) -> TutorLearningPlanResponse:
+    try:
+        title = str(data["plan_title"])
+        guess_md = str(data["jd_priority_guess_markdown"])
+        raw_days = list(data["days"])
+        tips_raw = data.get("tips", [])
+        tips = [str(x).strip() for x in list(tips_raw) if str(x).strip()]
+    except (KeyError, TypeError, ValueError) as e:
+        raise HTTPException(status_code=502, detail=f"学习计划 JSON 不完整: {e}") from e
+    if not title.strip():
+        raise HTTPException(status_code=502, detail="plan_title 不能为空")
+    if not guess_md.strip():
+        raise HTTPException(status_code=502, detail="jd_priority_guess_markdown 不能为空")
+    days_out: List[TutorPlanDay] = []
+    for d in raw_days:
+        try:
+            day_n = int(d["day"])
+            focus = str(d["focus"])
+            tasks_raw = list(d["tasks"])
+        except (KeyError, TypeError, ValueError) as e:
+            raise HTTPException(status_code=502, detail=f"学习计划 days 项无效: {e}") from e
+        tasks: List[TutorPlanTask] = []
+        for t in tasks_raw:
+            try:
+                task_s = str(t["task"])
+                mins = int(t["estimated_minutes"])
+            except (KeyError, TypeError, ValueError) as e:
+                raise HTTPException(
+                    status_code=502, detail=f"学习计划 task 无效: {e}"
+                ) from e
+            mins = max(5, min(180, mins))
+            tasks.append(TutorPlanTask(task=task_s, estimated_minutes=mins))
+        days_out.append(TutorPlanDay(day=day_n, focus=focus, tasks=tasks))
+    days_out.sort(key=lambda x: x.day)
+    if len(days_out) != expected_days:
+        raise HTTPException(
+            status_code=502,
+            detail=f"学习计划天数不符：请求 {expected_days} 天，模型返回 {len(days_out)} 天",
+        )
+    day_nums = [d.day for d in days_out]
+    if sorted(set(day_nums)) != list(range(1, expected_days + 1)):
+        raise HTTPException(
+            status_code=502,
+            detail="days 的 day 须为 1..plan_days 且无重复",
+        )
+    return TutorLearningPlanResponse(
+        plan_title=title,
+        jd_priority_guess_markdown=guess_md,
+        days=days_out,
+        tips=tips,
+    )
+
+
+def _extract_tutor_chat_payload(data: Dict[str, Any]) -> TutorChatResponse:
+    try:
+        reply = str(data["reply_markdown"])
+        sug_raw = data.get("suggested_followups", [])
+        sug = [str(x).strip() for x in list(sug_raw) if str(x).strip()]
+    except (KeyError, TypeError, ValueError) as e:
+        raise HTTPException(status_code=502, detail=f"Tutor 对话 JSON 不完整: {e}") from e
+    if not reply.strip():
+        raise HTTPException(status_code=502, detail="reply_markdown 不能为空")
+    return TutorChatResponse(reply_markdown=reply, suggested_followups=sug[:5])
 
 
 async def _run_evaluation_llm(
@@ -1403,7 +1639,9 @@ async def _evaluate_seed_question(
         reference_block=reference_block,
         key_points_block=key_points_block,
     )
-    score, strengths, missing, improved, weak_topics = _extract_eval_payload(data)
+    score, strengths, missing, improved, weak_topics, study_topics = _extract_eval_payload(
+        data
+    )
     if body.session_id and str(body.session_id).strip():
         sid = str(body.session_id).strip()
         record_weak_topics(sid, weak_topics)
@@ -1420,6 +1658,7 @@ async def _evaluate_seed_question(
         missing_points=missing,
         improved_answer=improved,
         weak_topics=weak_topics,
+        study_topics=study_topics,
         reference_evidence=evidence,
     )
 
@@ -1469,7 +1708,9 @@ async def _evaluate_llm_question(
         reference_block=reference_block,
         key_points_block=key_points_block,
     )
-    score, strengths, missing, improved, weak_topics = _extract_eval_payload(data)
+    score, strengths, missing, improved, weak_topics, study_topics = _extract_eval_payload(
+        data
+    )
     if body.session_id and str(body.session_id).strip():
         sid = str(body.session_id).strip()
         record_weak_topics(sid, weak_topics)
@@ -1486,5 +1727,62 @@ async def _evaluate_llm_question(
         missing_points=missing,
         improved_answer=improved,
         weak_topics=weak_topics,
+        study_topics=study_topics,
         reference_evidence=evidence,
     )
+
+
+@app.post(
+    "/sessions/{session_id}/tutor/learning-plan",
+    response_model=TutorLearningPlanResponse,
+)
+async def tutor_learning_plan(
+    session_id: str, body: TutorLearningPlanRequest
+) -> TutorLearningPlanResponse:
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="未知的 session_id。")
+    weak = _resolve_weak_topic(sess, body.weak_topic)
+    plan_days = int(body.plan_days)
+    user_prompt = build_tutor_learning_plan_user(
+        jd_text=body.jd_text.strip(),
+        weak_topic=weak,
+        session_baseline=_session_baseline_text(sess),
+        last_question_meta=_last_attempt_summary(sess),
+        plan_days=plan_days,
+    )
+    raw = await _run_tutor_json_llm(
+        system=TUTOR_LEARNING_PLAN_SYSTEM,
+        user=user_prompt,
+        temperature=0.5,
+    )
+    return _extract_learning_plan_payload(raw, expected_days=plan_days)
+
+
+@app.post("/sessions/{session_id}/tutor/chat", response_model=TutorChatResponse)
+async def tutor_chat(session_id: str, body: TutorChatRequest) -> TutorChatResponse:
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="未知的 session_id。")
+    for turn in body.history:
+        r = str(turn.role or "").strip().lower()
+        if r not in ("user", "assistant"):
+            raise HTTPException(
+                status_code=400, detail="history 中 role 只能是 user 或 assistant",
+            )
+    hist_payload: List[Dict[str, str]] = [
+        {"role": str(t.role).strip().lower(), "content": str(t.content)}
+        for t in body.history
+    ]
+    if len(hist_payload) > 24:
+        hist_payload = hist_payload[-24:]
+    jd_line = (body.jd_text or "").strip() or "(本次未提供 JD)"
+    user_prompt = build_tutor_chat_user(
+        jd_text=jd_line,
+        weak_topic=_resolve_weak_topic(sess, body.weak_topic),
+        session_baseline=_session_baseline_text(sess),
+        chat_history_json=json.dumps(hist_payload, ensure_ascii=False),
+        user_message=body.user_message.strip(),
+    )
+    raw = await _run_tutor_json_llm(system=TUTOR_CHAT_SYSTEM, user=user_prompt)
+    return _extract_tutor_chat_payload(raw)

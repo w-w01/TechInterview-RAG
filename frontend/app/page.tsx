@@ -12,6 +12,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
+import { Loader2 } from "lucide-react";
 
 const DIFFICULTIES = ["beginner", "intermediate", "advanced"] as const;
 
@@ -83,7 +84,19 @@ type EvaluateResponse = {
   missing_points: string[];
   improved_answer: string;
   weak_topics: string[];
+  study_topics?: string[];
   reference_evidence: ReferenceSnippet[];
+};
+
+type TutorPlanResponse = {
+  plan_title: string;
+  jd_priority_guess_markdown: string;
+  days: {
+    day: number;
+    focus: string;
+    tasks: { task: string; estimated_minutes: number }[];
+  }[];
+  tips: string[];
 };
 
 type QuestionDraftState = {
@@ -116,6 +129,33 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [evidenceOpen, setEvidenceOpen] = useState(true);
 
+  const [mainTab, setMainTab] = useState<"practice" | "learn">("practice");
+  const [learnWeakTopic, setLearnWeakTopic] = useState("");
+  const [planDays, setPlanDays] = useState(5);
+  const [learnPlan, setLearnPlan] = useState<TutorPlanResponse | null>(null);
+  const [loadingPlan, setLoadingPlan] = useState(false);
+  const [tutorTurns, setTutorTurns] = useState<
+    { role: string; content: string }[]
+  >([]);
+  const [tutorInput, setTutorInput] = useState("");
+  const [tutorLoading, setTutorLoading] = useState(false);
+  const [tutorFollowups, setTutorFollowups] = useState<string[]>([]);
+  const [learnQuizTopics, setLearnQuizTopics] = useState<string[]>([
+    "general_programming",
+  ]);
+  const [learnQuizBundle, setLearnQuizBundle] = useState<QuestionBundle | null>(
+    null,
+  );
+  const [learnQuizAnswer, setLearnQuizAnswer] = useState("");
+  const [learnQuizEval, setLearnQuizEval] = useState<EvaluateResponse | null>(
+    null,
+  );
+  const [learnQuizSessionTopics, setLearnQuizSessionTopics] = useState<string[]>(
+    [],
+  );
+  const [loadingLearnQuizGen, setLoadingLearnQuizGen] = useState(false);
+  const [loadingLearnQuizEval, setLoadingLearnQuizEval] = useState(false);
+
   /** JD 向量组卷 */
   const [jdText, setJdText] = useState("");
   const [jdPaperCount, setJdPaperCount] = useState(5);
@@ -138,6 +178,12 @@ export default function Home() {
         if (cancelled || !data.topics?.length) return;
         setTopicOptions(data.topics);
         setSelectedTopics((prev) => {
+          const valid = prev.filter((s) =>
+            data.topics.some((t) => t.slug === s),
+          );
+          return valid.length ? valid : [data.topics[0].slug];
+        });
+        setLearnQuizTopics((prev) => {
           const valid = prev.filter((s) =>
             data.topics.some((t) => t.slug === s),
           );
@@ -177,6 +223,16 @@ export default function Home() {
 
   const toggleTopic = useCallback((slug: string) => {
     setSelectedTopics((prev) => {
+      if (prev.includes(slug)) {
+        const next = prev.filter((s) => s !== slug);
+        return next.length ? next : prev;
+      }
+      return [...prev, slug];
+    });
+  }, []);
+
+  const toggleLearnQuizTopic = useCallback((slug: string) => {
+    setLearnQuizTopics((prev) => {
       if (prev.includes(slug)) {
         const next = prev.filter((s) => s !== slug);
         return next.length ? next : prev;
@@ -393,22 +449,247 @@ export default function Home() {
     }
   }, [answer, questionBundle, sessionTopics, sessionId]);
 
+  const onGenerateLearnQuiz = useCallback(async () => {
+    if (!sessionId) {
+      setError("缺少会话，请刷新页面重试。");
+      return;
+    }
+    setError(null);
+    setLearnQuizEval(null);
+    setLoadingLearnQuizGen(true);
+    try {
+      const res = await fetch(`${apiBase()}/generate-question-llm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topics: learnQuizTopics,
+          difficulty,
+          reference_max: 5,
+          session_id: sessionId,
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+      const data = (await res.json()) as GenerateLlmResponse;
+      setLearnQuizBundle({ mode: "llm", data });
+      setLearnQuizSessionTopics([...learnQuizTopics]);
+      setLearnQuizAnswer("");
+    } catch (e) {
+      setLearnQuizBundle(null);
+      setLearnQuizSessionTopics([]);
+      setError(e instanceof Error ? e.message : "小测出题失败");
+    } finally {
+      setLoadingLearnQuizGen(false);
+    }
+  }, [learnQuizTopics, difficulty, sessionId]);
+
+  const onEvaluateLearnQuiz = useCallback(async () => {
+    if (!sessionId || !learnQuizBundle || learnQuizBundle.mode !== "llm") {
+      setError("请先生成小测题目。");
+      return;
+    }
+    if (!learnQuizAnswer.trim()) {
+      setError("请填写小测答案。");
+      return;
+    }
+    if (learnQuizSessionTopics.length === 0) {
+      setError("小测缺少标签上下文，请重新出题。");
+      return;
+    }
+    setError(null);
+    setLoadingLearnQuizEval(true);
+    try {
+      const res = await fetch(`${apiBase()}/evaluate-answer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question: learnQuizBundle.data.question,
+          student_answer: learnQuizAnswer,
+          topics: learnQuizSessionTopics,
+          difficulty: learnQuizBundle.data.difficulty,
+          generation_id: learnQuizBundle.data.generation_id,
+          session_id: sessionId,
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+      const data = (await res.json()) as EvaluateResponse;
+      setLearnQuizEval(data);
+    } catch (e) {
+      setLearnQuizEval(null);
+      setError(e instanceof Error ? e.message : "小测评卷失败");
+    } finally {
+      setLoadingLearnQuizEval(false);
+    }
+  }, [
+    learnQuizAnswer,
+    learnQuizBundle,
+    learnQuizSessionTopics,
+    sessionId,
+  ]);
+
+  const onTutorPlan = useCallback(async () => {
+    if (!sessionId) {
+      setError("缺少会话，请刷新页面重试。");
+      return;
+    }
+    if (jdText.trim().length < 40) {
+      setError("学习计划需要 JD 不少于约 40 字。");
+      return;
+    }
+    setError(null);
+    setLoadingPlan(true);
+    try {
+      const res = await fetch(
+        `${apiBase()}/sessions/${sessionId}/tutor/learning-plan`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jd_text: jdText.trim(),
+            weak_topic: learnWeakTopic.trim(),
+            plan_days: planDays,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+      const data = (await res.json()) as TutorPlanResponse;
+      setLearnPlan(data);
+    } catch (e) {
+      setLearnPlan(null);
+      setError(e instanceof Error ? e.message : "学习计划生成失败");
+    } finally {
+      setLoadingPlan(false);
+    }
+  }, [sessionId, jdText, learnWeakTopic, planDays]);
+
+  const onTutorSend = useCallback(async () => {
+    if (!sessionId) {
+      setError("缺少会话，请刷新页面重试。");
+      return;
+    }
+    const msg = tutorInput.trim();
+    if (!msg) return;
+    setError(null);
+    setTutorLoading(true);
+    setTutorFollowups([]);
+    try {
+      const historyPayload = tutorTurns.map((t) => ({
+        role: t.role,
+        content: t.content,
+      }));
+      const res = await fetch(
+        `${apiBase()}/sessions/${sessionId}/tutor/chat`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            jd_text: jdText.trim(),
+            weak_topic: learnWeakTopic.trim(),
+            history: historyPayload,
+            user_message: msg,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+      const data = (await res.json()) as {
+        reply_markdown: string;
+        suggested_followups: string[];
+      };
+      setTutorTurns((prev) => [
+        ...prev,
+        { role: "user", content: msg },
+        { role: "assistant", content: data.reply_markdown },
+      ]);
+      setTutorInput("");
+      setTutorFollowups(data.suggested_followups ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Tutor 对话失败");
+    } finally {
+      setTutorLoading(false);
+    }
+  }, [sessionId, jdText, learnWeakTopic, tutorInput, tutorTurns]);
+
   const selectClass =
     "flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
+
+  const practiceLoadingLabel = loadingJd
+    ? "正在根据 JD 组卷，请稍候…"
+    : loadingGen
+      ? "正在生成题目…"
+      : loadingEval
+        ? "正在评卷…"
+        : jdEvaluatingKey
+          ? "正在评估试卷中的题目…"
+          : null;
+
+  const learnLoadingLabel = loadingPlan
+    ? "正在推断 JD 侧重点并生成学习计划…"
+    : tutorLoading
+      ? "Tutor 正在回复…"
+      : loadingLearnQuizGen
+        ? "正在生成小测题…"
+        : loadingLearnQuizEval
+          ? "正在评卷…"
+          : null;
 
   return (
     <div className="min-h-screen bg-muted/40 px-4 py-10">
       <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            InterviewMate RAG
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            本地演示：可按标签随机/AI 出题，或粘贴 JD
-            做向量检索组卷后选题练习；评卷均为 LLM rubric。页面加载时会创建后端练习会话。
-          </p>
+        <header className="space-y-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div className="space-y-1">
+              <h1 className="text-2xl font-semibold tracking-tight">
+                InterviewMate RAG
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                本地演示：可按标签随机/AI 出题，或粘贴 JD
+                做向量检索组卷后选题练习；评卷均为 LLM rubric；「学习」页提供基于 JD
+                的学习计划（含侧重点推断）与 Tutor 对话。页面加载时会创建后端练习会话。
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={mainTab === "practice" ? "default" : "outline"}
+                onClick={() => setMainTab("practice")}
+              >
+                答题
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={mainTab === "learn" ? "default" : "outline"}
+                onClick={() => setMainTab("learn")}
+              >
+                学习
+              </Button>
+            </div>
+          </div>
         </header>
 
+        {mainTab === "practice" && (
+          <>
+        {practiceLoadingLabel && (
+          <div
+            role="status"
+            className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
+          >
+            <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
+            <span>{practiceLoadingLabel}</span>
+          </div>
+        )}
         <Card>
           <CardHeader>
             <CardTitle>JD 组卷（向量检索）</CardTitle>
@@ -621,6 +902,22 @@ export default function Home() {
                                         paperQuestionKey(q)
                                       ]?.evaluation?.weak_topics.map((w) => (
                                         <li key={w}>{w}</li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                ) : null}
+                                {(jdDrafts[paperQuestionKey(q)]?.evaluation
+                                  ?.study_topics?.length ?? 0) > 0 ? (
+                                  <div>
+                                    <p className="text-xs font-medium">
+                                      建议学习方向
+                                    </p>
+                                    <ul className="list-disc pl-5 text-xs">
+                                      {(
+                                        jdDrafts[paperQuestionKey(q)]?.evaluation
+                                          ?.study_topics ?? []
+                                      ).map((s) => (
+                                        <li key={s}>{s}</li>
                                       ))}
                                     </ul>
                                   </div>
@@ -844,6 +1141,16 @@ export default function Home() {
                   </ul>
                 </div>
               )}
+              {(evaluation.study_topics?.length ?? 0) > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">建议学习方向</p>
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                    {(evaluation.study_topics ?? []).map((s) => (
+                      <li key={s}>{s}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
               <Separator />
               <details
                 className="rounded-lg border border-border bg-card/30 [&_summary::-webkit-details-marker]:hidden"
@@ -866,6 +1173,324 @@ export default function Home() {
               </details>
             </CardContent>
           </Card>
+        )}
+          </>
+        )}
+
+        {mainTab === "learn" && (
+          <>
+            {learnLoadingLabel && (
+              <div
+                role="status"
+                className="flex items-center gap-2 rounded-lg border border-border bg-muted/50 px-4 py-3 text-sm text-muted-foreground"
+              >
+                <Loader2 className="size-4 shrink-0 animate-spin" aria-hidden />
+                <span>{learnLoadingLabel}</span>
+              </div>
+            )}
+            <Card>
+              <CardHeader>
+                <CardTitle>学习上下文</CardTitle>
+                <CardDescription>
+                  与「答题」共用同一份 JD 文本（不少于约 40
+                  字）。薄弱主题可手动填写；留空则由后端按当前会话薄弱频次推断。计划会先给出对「对方可能更看重什么」的推断，再按你选择的天数排期。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="learn-jd">职位描述（JD）</Label>
+                  <Textarea
+                    id="learn-jd"
+                    rows={5}
+                    value={jdText}
+                    onChange={(e) => setJdText(e.target.value)}
+                    placeholder="与答题区相同字段，任一侧编辑会同步……"
+                    className="resize-y"
+                  />
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Label htmlFor="learn-weak">聚焦薄弱主题（可选）</Label>
+                  <input
+                    id="learn-weak"
+                    type="text"
+                    className={selectClass}
+                    value={learnWeakTopic}
+                    onChange={(e) => setLearnWeakTopic(e.target.value)}
+                    placeholder="例如：并发与锁、JVM 内存模型……"
+                  />
+                </div>
+                <div className="flex flex-col gap-2 sm:max-w-md">
+                  <Label htmlFor="plan-days">几天内学完本计划</Label>
+                  <select
+                    id="plan-days"
+                    className={selectClass}
+                    value={planDays}
+                    onChange={(e) =>
+                      setPlanDays(
+                        Math.min(
+                          14,
+                          Math.max(1, parseInt(e.target.value, 10) || 5),
+                        ),
+                      )
+                    }
+                  >
+                    {Array.from({ length: 14 }, (_, i) => i + 1).map((n) => (
+                      <option key={n} value={n}>
+                        {n} 天
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={onTutorPlan}
+                    disabled={
+                      loadingPlan || !sessionId || jdText.trim().length < 40
+                    }
+                  >
+                    {loadingPlan ? "生成中…" : "生成学习计划"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setTutorTurns([]);
+                      setTutorFollowups([]);
+                      setTutorInput("");
+                    }}
+                  >
+                    清空对话
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {learnPlan && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>{learnPlan.plan_title}</CardTitle>
+                  <CardDescription>
+                    模型推断的侧重点仅供参考；逐日任务应与上方推断一致。
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-3">
+                    <p className="text-sm font-medium text-amber-900 dark:text-amber-100">
+                      侧重点推断（基于 JD 的推测，非事实）
+                    </p>
+                    <pre className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                      {learnPlan.jd_priority_guess_markdown}
+                    </pre>
+                  </div>
+                  <ul className="space-y-4 text-sm">
+                    {learnPlan.days.map((d) => (
+                      <li
+                        key={d.day}
+                        className="rounded-md border border-border bg-muted/20 p-3"
+                      >
+                        <p className="font-medium">
+                          第 {d.day} 天 · {d.focus}
+                        </p>
+                        <ul className="mt-2 list-disc space-y-1 pl-5 text-muted-foreground">
+                          {d.tasks.map((t) => (
+                            <li key={`${d.day}-${t.task}`}>
+                              {t.task}{" "}
+                              <span className="text-xs">
+                                （约 {t.estimated_minutes} 分钟）
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
+                    ))}
+                  </ul>
+                  {learnPlan.tips.length > 0 && (
+                    <div>
+                      <p className="text-sm font-medium">建议</p>
+                      <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+                        {learnPlan.tips.map((t) => (
+                          <li key={t}>{t}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Tutor 对话</CardTitle>
+                <CardDescription>
+                  结构化答疑；JD 与薄弱主题会注入上下文（可为空）。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border bg-muted/20 p-3 text-sm">
+                  {tutorTurns.length === 0 ? (
+                    <p className="text-muted-foreground">尚无消息，在下方输入后发送。</p>
+                  ) : (
+                    tutorTurns.map((t, i) => (
+                      <div
+                        key={`${i}-${t.role}-${t.content.slice(0, 12)}`}
+                        className={
+                          t.role === "user"
+                            ? "rounded-md bg-background/80 p-2"
+                            : "rounded-md border border-border bg-card/60 p-2"
+                        }
+                      >
+                        <p className="text-xs font-medium text-muted-foreground">
+                          {t.role === "user" ? "你" : "Tutor"}
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap leading-relaxed">
+                          {t.content}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                  {tutorLoading && (
+                    <div className="flex items-center gap-2 rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin shrink-0" />
+                      <span>Tutor 正在组织回复…</span>
+                    </div>
+                  )}
+                </div>
+                {tutorFollowups.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">
+                      可继续问
+                    </p>
+                    <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
+                      {tutorFollowups.map((f) => (
+                        <li key={f}>{f}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Textarea
+                    rows={3}
+                    value={tutorInput}
+                    onChange={(e) => setTutorInput(e.target.value)}
+                    placeholder="输入问题后发送……"
+                    className="min-h-[4.5rem] flex-1 resize-y"
+                  />
+                  <Button
+                    type="button"
+                    className="sm:self-end"
+                    onClick={onTutorSend}
+                    disabled={tutorLoading || !sessionId}
+                  >
+                    {tutorLoading ? "发送中…" : "发送"}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>薄弱主题小测（AI 题）</CardTitle>
+                <CardDescription>
+                  勾选标签后生成一道 AI 题并评卷，用于巩固「学习」聚焦方向。
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <Label>小测标签（多选）</Label>
+                  <div className="flex flex-wrap gap-3">
+                    {topicOptions.map((opt) => (
+                      <label
+                        key={`lq-${opt.slug}`}
+                        className="flex cursor-pointer items-center gap-2 text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          className="size-4 rounded border-input"
+                          checked={learnQuizTopics.includes(opt.slug)}
+                          onChange={() => toggleLearnQuizTopic(opt.slug)}
+                        />
+                        <span>{opt.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end">
+                  <div className="flex flex-col gap-2">
+                    <Label htmlFor="learn-quiz-diff">难度（与答题区同步）</Label>
+                    <select
+                      id="learn-quiz-diff"
+                      className={selectClass}
+                      value={difficulty}
+                      onChange={(e) =>
+                        setDifficulty(e.target.value as Difficulty)
+                      }
+                    >
+                      {DIFFICULTIES.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={onGenerateLearnQuiz}
+                    disabled={
+                      loadingLearnQuizGen || !sessionId || learnQuizTopics.length === 0
+                    }
+                  >
+                    {loadingLearnQuizGen ? "出题中…" : "生成小测题"}
+                  </Button>
+                </div>
+                {learnQuizBundle && (
+                  <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+                    <p className="leading-relaxed">{learnQuizBundle.data.question}</p>
+                    <Textarea
+                      rows={6}
+                      value={learnQuizAnswer}
+                      onChange={(e) => setLearnQuizAnswer(e.target.value)}
+                      placeholder="小测作答……"
+                    />
+                    <Button
+                      type="button"
+                      onClick={onEvaluateLearnQuiz}
+                      disabled={loadingLearnQuizEval}
+                    >
+                      {loadingLearnQuizEval ? "评估中…" : "提交评卷"}
+                    </Button>
+                    {learnQuizEval && (
+                      <div className="space-y-2 border-t pt-3">
+                        <p>
+                          分数{" "}
+                          <span className="font-semibold">{learnQuizEval.score}</span>{" "}
+                          /10
+                        </p>
+                        <div>
+                          <p className="text-xs font-medium">改进版回答</p>
+                          <p className="whitespace-pre-wrap text-xs leading-relaxed">
+                            {learnQuizEval.improved_answer}
+                          </p>
+                        </div>
+                        {(learnQuizEval.study_topics?.length ?? 0) > 0 && (
+                          <div>
+                            <p className="text-xs font-medium">建议学习方向</p>
+                            <ul className="list-disc pl-5 text-xs">
+                              {(learnQuizEval.study_topics ?? []).map((s) => (
+                                <li key={s}>{s}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </>
         )}
 
         {error && (
