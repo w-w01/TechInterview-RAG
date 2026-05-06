@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import random
 import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -21,8 +20,12 @@ from .generation_store import GenerationSnapshot, get_snapshot, put_snapshot
 from .prompts import (
     EVALUATION_SYSTEM_PROMPT,
     GENERATION_SYSTEM_PROMPT,
+    JD_PLANNER_SYSTEM_PROMPT,
+    JD_SELECTOR_SYSTEM_PROMPT,
     build_evaluation_user_prompt,
     build_generation_user_prompt,
+    build_jd_planner_user_prompt,
+    build_jd_selector_user_prompt,
 )
 from .rag import RAGService, _item_topic_slugs
 from .schemas import (
@@ -98,6 +101,8 @@ JD_UNSEEN_SUFFICIENT_MULTIPLIER = _env_int("JD_UNSEEN_SUFFICIENT_MULTIPLIER", 2,
 JD_SEEN_RATIO_MID = _env_float("JD_SEEN_RATIO_MID", 0.5, min_v=0.0, max_v=1.0)
 JD_SEEN_RATIO_HIGH = _env_float("JD_SEEN_RATIO_HIGH", 0.8, min_v=0.0, max_v=1.0)
 JD_SHORTFALL_EXTRA_DIV = _env_int("JD_SHORTFALL_EXTRA_DIV", 2, min_v=1)
+JD_CANDIDATE_PER_TOPIC = _env_int("JD_CANDIDATE_PER_TOPIC", 12, min_v=4)
+JD_SELECTOR_MAX_ITEMS = _env_int("JD_SELECTOR_MAX_ITEMS", 96, min_v=20)
 
 _topic_entries: List[Dict[str, str]] = load_topic_allowlist()
 ALLOWED_SLUGS: Set[str] = {e["slug"] for e in _topic_entries}
@@ -265,6 +270,38 @@ def _topic_priority_from_ranked(
     return [k for k, _ in freq.most_common()]
 
 
+def _jd_primary_topic_cap(paper_or_seed_count: int) -> int:
+    """
+    JD 组卷：最高优先级 topic 在整卷（或真题槽位数）中的上限。
+    例如 5 题时约 2～3 题，避免全卷挤在同一知识点。
+    """
+    n = int(paper_or_seed_count)
+    if n <= 0:
+        return 0
+    if n <= 2:
+        return n
+    return min(3, max(2, (n + 1) // 2))
+
+
+def _count_picked_with_topic(picked: List[Dict[str, Any]], topic: str) -> int:
+    if not str(topic).strip():
+        return 0
+    return sum(1 for it in picked if topic in _topics_sorted_from_item(it))
+
+
+def _jd_count_primary_in_paper_questions(
+    paper_questions: List[PaperQuestion], primary: str
+) -> int:
+    if not str(primary).strip():
+        return 0
+    n = 0
+    for q in paper_questions:
+        topics = q.topics or []
+        if primary in topics:
+            n += 1
+    return n
+
+
 def _recommended_difficulty_by_topic(
     topic_baseline: Dict[str, Dict[str, Any]]
 ) -> Tuple[Dict[str, str], List[str]]:
@@ -290,64 +327,6 @@ def _recommended_difficulty_by_topic(
         else:
             rec[topic] = dom
     return rec, reasons
-
-
-def _pick_topic_items_with_random_difficulty(
-    *,
-    topic: str,
-    ranked: List[Dict[str, Any]],
-    target_diff: str,
-    desired_count: int,
-    used_ids: Set[str],
-    answered_seed_ids: Set[str],
-) -> List[Dict[str, Any]]:
-    """
-    在某 topic 下按随机难度分布选题：
-    - 70% 目标难度
-    - 20% 邻近较低
-    - 10% 邻近较高
-    并跳过已答过与已使用题。
-    """
-    out: List[Dict[str, Any]] = []
-    if desired_count <= 0:
-        return out
-    td = _clamp_difficulty(target_diff)
-    lower = _bump_difficulty(td, -1)
-    upper = _bump_difficulty(td, +1)
-    topic_pool = [
-        it
-        for it in ranked
-        if topic in _topics_sorted_from_item(it)
-        and str(it.get("id", "")).strip() not in answered_seed_ids
-        and str(it.get("id", "")).strip() not in used_ids
-    ]
-    random.shuffle(topic_pool)
-    for _ in range(desired_count):
-        roll = random.random()
-        want = td if roll < 0.7 else (lower if roll < 0.9 else upper)
-        hit = next(
-            (
-                it
-                for it in topic_pool
-                if str(it.get("difficulty", "")).strip() == want
-                and str(it.get("id", "")).strip() not in used_ids
-            ),
-            None,
-        )
-        if hit is None:
-            hit = next(
-                (
-                    it
-                    for it in topic_pool
-                    if str(it.get("id", "")).strip() not in used_ids
-                ),
-                None,
-            )
-        if hit is None:
-            break
-        out.append(hit)
-        used_ids.add(str(hit.get("id", "")).strip())
-    return out
 
 
 def _compute_ai_mix_count(
@@ -686,11 +665,277 @@ async def generate_question_llm(
     )
 
 
+def _jd_key_points_preview(
+    item: Dict[str, Any], max_n: int = 4, max_len: int = 120
+) -> List[str]:
+    """候选送给 Selector 的要点预览（缩短 token）。"""
+    kp = item.get("key_points") or []
+    if not isinstance(kp, list):
+        kp = [str(kp)] if kp else []
+    out: List[str] = []
+    for x in kp[:max_n]:
+        s = str(x).strip()
+        if len(s) > max_len:
+            s = s[:max_len] + "…"
+        if s:
+            out.append(s)
+    return out
+
+
+def _build_jd_selector_candidate_items(
+    topic_priority: List[str],
+    ranked: List[Dict[str, Any]],
+    answered_seed_ids: Set[str],
+) -> List[Dict[str, Any]]:
+    """按 topic 优先级从 JD 检索序中分层取候选，再全局补足。"""
+    per_topic_cap = JD_CANDIDATE_PER_TOPIC
+    global_cap = JD_SELECTOR_MAX_ITEMS
+    seen: Set[str] = set()
+    out: List[Dict[str, Any]] = []
+    for tp in topic_priority:
+        n = 0
+        for it in ranked:
+            if len(out) >= global_cap:
+                return out
+            iid = str(it.get("id", "")).strip()
+            if not iid or iid in seen or iid in answered_seed_ids:
+                continue
+            if tp not in _topics_sorted_from_item(it):
+                continue
+            seen.add(iid)
+            out.append(it)
+            n += 1
+            if n >= per_topic_cap:
+                break
+    for it in ranked:
+        if len(out) >= global_cap:
+            break
+        iid = str(it.get("id", "")).strip()
+        if not iid or iid in seen or iid in answered_seed_ids:
+            continue
+        seen.add(iid)
+        out.append(it)
+    return out
+
+
+def _jd_candidate_rows_for_selector_json(
+    items: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for it in items:
+        rows.append(
+            {
+                "question_id": str(it.get("id", "")),
+                "question": str(it.get("question", ""))[:2000],
+                "topics": sorted(_item_topic_slugs(it)),
+                "difficulty": str(it.get("difficulty", "")),
+                "key_points_preview": _jd_key_points_preview(it),
+            }
+        )
+    return rows
+
+
+async def _jd_run_topic_planner(jd_text: str) -> Tuple[List[str], List[str]]:
+    """Planner：只输出白名单内 topic 优先级。"""
+    allowlist_lines = "\n".join(
+        f"- {e['slug']}: {e['label']}" for e in _topic_entries
+    )
+    user_prompt = build_jd_planner_user_prompt(
+        jd_text=jd_text, allowlist_lines=allowlist_lines
+    )
+    last_err: Optional[Exception] = None
+    for _ in range(2):
+        try:
+            completion = await _get_openai().chat.completions.create(
+                model="gpt-4o-mini",
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": JD_PLANNER_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.35,
+            )
+            raw = completion.choices[0].message.content or "{}"
+            data = json.loads(raw)
+            raw_list = data.get("topic_priority") or []
+            out: List[str] = []
+            for x in raw_list:
+                s = str(x).strip().lower()
+                if s in ALLOWED_SLUGS and s not in out:
+                    out.append(s)
+            notes_raw = data.get("notes") or []
+            notes = [str(x).strip() for x in notes_raw if str(x).strip()]
+            return out, notes[:6]
+        except Exception as e:
+            last_err = e
+            continue
+    raise HTTPException(
+        status_code=502, detail=f"JD topic 规划失败: {last_err!s}"
+    ) from last_err
+
+
+async def _jd_run_paper_selector(
+    *,
+    jd_excerpt: str,
+    topic_priority: List[str],
+    seed_count: int,
+    ai_count: int,
+    request_difficulty: str,
+    primary_topic_cap: int,
+    weak_topics: List[str],
+    recommended_by_topic: Dict[str, str],
+    candidate_rows: List[Dict[str, Any]],
+) -> Tuple[List[str], List[Dict[str, Any]], str]:
+    """Selector：仅允许选择候选中的 question_id，并规划 AI 槽位。"""
+    rec_json = json.dumps(recommended_by_topic, ensure_ascii=False)
+    cand_json = json.dumps(candidate_rows, ensure_ascii=False)
+    user_prompt = build_jd_selector_user_prompt(
+        jd_excerpt=jd_excerpt,
+        topic_priority=topic_priority,
+        seed_count=seed_count,
+        ai_count=ai_count,
+        request_difficulty=request_difficulty,
+        primary_topic_cap=primary_topic_cap,
+        weak_topics=weak_topics,
+        recommended_by_topic_json=rec_json,
+        candidates_json=cand_json,
+    )
+    last_err: Optional[Exception] = None
+    for _ in range(2):
+        try:
+            completion = await _get_openai().chat.completions.create(
+                model="gpt-4o-mini",
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": JD_SELECTOR_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.25,
+            )
+            raw = completion.choices[0].message.content or "{}"
+            data = json.loads(raw)
+            ids = [str(x).strip() for x in (data.get("selected_seed_ids") or [])]
+            slots_raw = data.get("ai_slots") or []
+            norm_slots: List[Dict[str, Any]] = []
+            for s in slots_raw:
+                if not isinstance(s, dict):
+                    continue
+                t_list = [
+                    str(x).strip().lower()
+                    for x in (s.get("topics") or [])
+                    if str(x).strip().lower() in ALLOWED_SLUGS
+                ]
+                t_list = list(dict.fromkeys(t_list))[:4]
+                d = str(s.get("difficulty") or "").strip().lower()
+                if d not in ALLOWED_DIFFICULTY:
+                    d = ""
+                norm_slots.append({"topics": t_list, "difficulty": d})
+            notes = str(data.get("notes") or "").strip()
+            return ids, norm_slots, notes
+        except Exception as e:
+            last_err = e
+            continue
+    raise HTTPException(
+        status_code=502, detail=f"JD 选题规划失败: {last_err!s}"
+    ) from last_err
+
+
+def _finalize_seed_picked_from_selector(
+    selected_ids: List[str],
+    candidate_by_id: Dict[str, Dict[str, Any]],
+    seed_count: int,
+    seed_candidates_ordered: List[Dict[str, Any]],
+    topic_priority: List[str],
+    program_fixes: List[str],
+) -> List[Dict[str, Any]]:
+    """校验 id、去重、单 topic 上限与不足补齐。"""
+    valid_set = set(candidate_by_id.keys())
+    filtered: List[str] = []
+    seen: Set[str] = set()
+    for i in selected_ids:
+        if i in valid_set and i not in seen:
+            filtered.append(i)
+            seen.add(i)
+        elif i and i not in valid_set:
+            program_fixes.append(f"忽略无效真题 id：{i}")
+
+    primary_tp = topic_priority[0] if topic_priority else ""
+    cap = _jd_primary_topic_cap(seed_count)
+
+    def count_primary(ids: List[str]) -> int:
+        return sum(
+            1
+            for x in ids
+            if x in candidate_by_id
+            and primary_tp in _topics_sorted_from_item(candidate_by_id[x])
+        )
+
+    passed: List[str] = []
+    for i in filtered:
+        if len(passed) >= seed_count:
+            break
+        it = candidate_by_id.get(i)
+        if not it:
+            continue
+        if primary_tp and primary_tp in _topics_sorted_from_item(it):
+            if count_primary(passed) >= cap:
+                program_fixes.append(
+                    f"跳过真题 {i}（已达最高优 topic 真题上限 {cap}）"
+                )
+                continue
+        passed.append(i)
+
+    for it in seed_candidates_ordered:
+        if len(passed) >= seed_count:
+            break
+        iid = str(it.get("id", "")).strip()
+        if not iid or iid in passed or iid not in valid_set:
+            continue
+        if primary_tp and primary_tp in _topics_sorted_from_item(it):
+            if count_primary(passed) >= cap:
+                continue
+        passed.append(iid)
+        program_fixes.append(f"程序补齐真题 id {iid}")
+
+    return [candidate_by_id[i] for i in passed[:seed_count] if i in candidate_by_id]
+
+
+def _normalize_ai_slots_list(
+    raw_slots: List[Dict[str, Any]],
+    ai_count: int,
+    topic_priority: List[str],
+    body_difficulty: str,
+    program_fixes: List[str],
+) -> List[Dict[str, Any]]:
+    """将 Selector 的 ai_slots 规范到固定条数与合法 topics/difficulty。"""
+    slots = list(raw_slots)
+    tp_fallback = topic_priority[0] if topic_priority else next(iter(ALLOWED_SLUGS))
+    while len(slots) < ai_count:
+        idx = len(slots)
+        rot = topic_priority[idx % len(topic_priority)] if topic_priority else tp_fallback
+        slots.append({"topics": [rot], "difficulty": body_difficulty})
+        program_fixes.append("程序补齐 AI 槽位")
+    if len(slots) > ai_count:
+        program_fixes.append(f"截断 AI 槽位 {len(slots)}→{ai_count}")
+        slots = slots[:ai_count]
+    out: List[Dict[str, Any]] = []
+    for s in slots:
+        topics = [t for t in (s.get("topics") or []) if t in ALLOWED_SLUGS]
+        topics = list(dict.fromkeys(topics))
+        if not topics:
+            topics = [tp_fallback]
+        diff = str(s.get("difficulty") or "").strip().lower()
+        if diff not in ALLOWED_DIFFICULTY:
+            diff = body_difficulty
+        out.append({"topics": topics[:4], "difficulty": diff})
+    return out
+
+
 @app.post("/generate-paper-from-jd", response_model=GeneratePaperFromJdResponse)
 async def generate_paper_from_jd(
     body: GeneratePaperFromJdRequest,
 ) -> GeneratePaperFromJdResponse:
-    """JD 纯文本嵌入后组卷：首卷覆盖多难度，后续按最近3卷topic基线自适应。"""
+    """JD 组卷：向量检索候选 → LLM Planner(topic 白名单优先级) → LLM Selector(选题+AI 槽) → 程序校验出题。"""
     if body.difficulty not in ALLOWED_DIFFICULTY:
         raise HTTPException(
             status_code=400,
@@ -754,7 +999,16 @@ async def generate_paper_from_jd(
                 sess.weakness_counts.items(), key=lambda kv: kv[1], reverse=True
             )[:5]
         ]
-    topic_priority = _topic_priority_from_ranked(ranked, dict(sess.weakness_counts) if sess else {})
+    topic_priority_llm, planner_notes = await _jd_run_topic_planner(jd_trunc)
+    topic_priority = list(topic_priority_llm)
+    if not topic_priority:
+        topic_priority = _topic_priority_from_ranked(
+            ranked, dict(sess.weakness_counts) if sess else {}
+        )
+        planner_notes = list(planner_notes) + [
+            "Planner 未返回合法 slug，已回退为检索候选频次+弱点加权"
+        ]
+
     if weak_topics:
         ranked.sort(
             key=lambda it: (_weak_score_for_item(it, weak_topics)),
@@ -782,92 +1036,64 @@ async def generate_paper_from_jd(
         shortage = seed_count - len(seed_candidates)
         seed_count = len(seed_candidates)
         ai_count = min(body.count - seed_count, ai_count + shortage)
-    # 首卷：覆盖多难度与多topic；后续：按topic基线调节
-    used_ids: Set[str] = set()
-    seed_picked: List[Dict[str, Any]] = []
-    has_history = bool(topic_baseline) and body.auto_adapt
-    if not has_history:
-        # 覆盖型策略：难度轮询 + topic优先轮询
-        if not topic_priority:
-            topic_priority = sorted({t for it in seed_candidates for t in _topics_sorted_from_item(it)})
-        diff_cycle: List[str] = []
-        for i in range(seed_count):
-            diff_cycle.append(_DIFF_ORDER[i % len(_DIFF_ORDER)] if body.auto_adapt else body.difficulty)
-        topic_idx = 0
-        for d in diff_cycle:
-            desired_topic = topic_priority[topic_idx % len(topic_priority)] if topic_priority else ""
-            topic_idx += 1
-            hit = next(
-                (
-                    it
-                    for it in seed_candidates
-                    if str(it.get("id", "")).strip() not in used_ids
-                    and str(it.get("difficulty", "")).strip() == d
-                    and (not desired_topic or desired_topic in _topics_sorted_from_item(it))
-                ),
-                None,
-            )
-            if hit is None:
-                hit = next(
-                    (
-                        it
-                        for it in seed_candidates
-                        if str(it.get("id", "")).strip() not in used_ids
-                        and str(it.get("difficulty", "")).strip() == d
-                    ),
-                    None,
-                )
-            if hit is None:
-                hit = next(
-                    (
-                        it
-                        for it in seed_candidates
-                        if str(it.get("id", "")).strip() not in used_ids
-                    ),
-                    None,
-                )
-            if hit is None:
-                break
-            used_ids.add(str(hit.get("id", "")).strip())
-            seed_picked.append(hit)
-    else:
-        # 自适应策略：按 topic_priority 分配，并按推荐难度+随机性抽取
-        if not topic_priority:
-            topic_priority = sorted(topic_baseline.keys())
-        if not topic_priority:
-            topic_priority = sorted({t for it in seed_candidates for t in _topics_sorted_from_item(it)})
-        if not topic_priority:
-            seed_picked = seed_candidates[:seed_count]
-        else:
-            per_topic = max(1, seed_count // len(topic_priority))
-            for tp in topic_priority:
-                target = recommended_by_topic.get(tp, body.difficulty)
-                picked = _pick_topic_items_with_random_difficulty(
-                    topic=tp,
-                    ranked=seed_candidates,
-                    target_diff=target,
-                    desired_count=per_topic,
-                    used_ids=used_ids,
-                    answered_seed_ids=answered_seed_ids,
-                )
-                seed_picked.extend(picked)
-                if len(seed_picked) >= seed_count:
-                    break
-            if len(seed_picked) < seed_count:
-                for it in seed_candidates:
-                    iid = str(it.get("id", "")).strip()
-                    if not iid or iid in used_ids:
-                        continue
-                    used_ids.add(iid)
-                    seed_picked.append(it)
-                    if len(seed_picked) >= seed_count:
-                        break
-    seed_picked = seed_picked[:seed_count]
+
+    if not topic_priority:
+        topic_priority = sorted(
+            {t for it in seed_candidates for t in _topics_sorted_from_item(it)}
+        )
+
+    program_fixes: List[str] = []
+    candidate_items = _build_jd_selector_candidate_items(
+        topic_priority, ranked, answered_seed_ids
+    )
+    seed_cand_ids = {str(it.get("id", "")).strip() for it in seed_candidates}
+    candidate_items = [
+        it
+        for it in candidate_items
+        if str(it.get("id", "")).strip() in seed_cand_ids
+    ]
+    if not candidate_items:
+        raise HTTPException(
+            status_code=404,
+            detail="当前 JD 与去重条件下无可用候选真题，无法组卷。",
+        )
+    candidate_by_id = {
+        str(it.get("id", "")).strip(): it
+        for it in candidate_items
+        if str(it.get("id", "")).strip()
+    }
+    cand_rows = _jd_candidate_rows_for_selector_json(candidate_items)
+    primary_cap_seeds = _jd_primary_topic_cap(seed_count)
+    jd_excerpt = jd_trunc[:3500]
+    selected_ids, ai_slots_raw, selector_notes = await _jd_run_paper_selector(
+        jd_excerpt=jd_excerpt,
+        topic_priority=topic_priority,
+        seed_count=seed_count,
+        ai_count=ai_count,
+        request_difficulty=body.difficulty,
+        primary_topic_cap=primary_cap_seeds,
+        weak_topics=weak_topics,
+        recommended_by_topic=recommended_by_topic,
+        candidate_rows=cand_rows,
+    )
+    seed_picked = _finalize_seed_picked_from_selector(
+        selected_ids,
+        candidate_by_id,
+        seed_count,
+        seed_candidates,
+        topic_priority,
+        program_fixes,
+    )
+    ai_slots = _normalize_ai_slots_list(
+        ai_slots_raw, ai_count, topic_priority, body.difficulty, program_fixes
+    )
 
     questions: List[PaperQuestion] = []
     attempts_to_append: List[Dict[str, Any]] = []
     for it in seed_picked:
-        q = _item_to_generate_question_response(it, body.difficulty)
+        q = _item_to_generate_question_response(
+            it, str(it.get("difficulty", body.difficulty))
+        )
         questions.append(
             PaperQuestion(
                 source="seed",
@@ -893,13 +1119,38 @@ async def generate_paper_from_jd(
         )
         answered_question_keys.add(_normalize_question_key(q.question))
 
-    # AI 题以「补弱优先」采样：若有薄弱点，优先从命中薄弱关键词的种子中抽样。
+    # AI 题：按 Selector 给出的 ai_slots（topics + difficulty）抽样少样本后出题。
     weak_ranked = [it for it in ranked if _weak_score_for_item(it, weak_topics) > 0]
     ai_sample_pool = weak_ranked if weak_ranked else ranked
-    for _ in range(ai_count):
+    primary_for_mix = topic_priority[0] if topic_priority else ""
+    primary_cap_whole_paper = _jd_primary_topic_cap(body.count)
+    for slot in ai_slots:
+        slot_topics: List[str] = slot["topics"]
+        slot_diff: str = slot["difficulty"]
         built = False
         for _retry in range(3):
-            samples = rag.sample_pool_items(ai_sample_pool, 3)
+            pool_match = rag.pool_for_topics_and_difficulty(slot_topics, slot_diff)
+            sample_base: List[Dict[str, Any]] = list(pool_match) if pool_match else []
+            if not sample_base:
+                want = set(slot_topics)
+                sample_base = [
+                    it
+                    for it in ai_sample_pool
+                    if _item_topic_slugs(it) & want
+                ]
+            if not sample_base:
+                sample_base = list(ai_sample_pool)
+            if primary_for_mix and _jd_count_primary_in_paper_questions(
+                questions, primary_for_mix
+            ) >= primary_cap_whole_paper:
+                narrow_ai = [
+                    it
+                    for it in sample_base
+                    if primary_for_mix not in _topics_sorted_from_item(it)
+                ]
+                if narrow_ai:
+                    sample_base = narrow_ai
+            samples = rag.sample_pool_items(sample_base, 3)
             if not samples:
                 samples = rag.sample_pool_items(ranked, 3)
             sample_topics: List[str] = []
@@ -907,10 +1158,11 @@ async def generate_paper_from_jd(
                 for slug in _topics_sorted_from_item(it):
                     if slug not in sample_topics:
                         sample_topics.append(slug)
+            gen_topics = list(dict.fromkeys([*slot_topics, *sample_topics]))
             try:
                 paper_q, attempt = await _generate_llm_question_from_samples(
-                    topics=sample_topics,
-                    difficulty=body.difficulty,
+                    topics=gen_topics,
+                    difficulty=slot_diff,
                     samples=samples,
                     forbidden_question_keys=answered_question_keys,
                 )
@@ -935,7 +1187,9 @@ async def generate_paper_from_jd(
             )
             if fallback is None:
                 continue
-            q = _item_to_generate_question_response(fallback, body.difficulty)
+            q = _item_to_generate_question_response(
+                fallback, str(fallback.get("difficulty", body.difficulty))
+            )
             questions.append(
                 PaperQuestion(
                     source="seed",
@@ -976,16 +1230,19 @@ async def generate_paper_from_jd(
             mixed.append(llm_list[l_idx])
             l_idx += 1
     mixed = mixed[: body.count]
+    final_seed_count = len([x for x in mixed if x.source == "seed"])
+    final_ai_count = len([x for x in mixed if x.source == "llm"])
+    base_ai_count = max(1, body.count // JD_BASE_AI_RATIO_EVERY)
+    final_boosted = final_ai_count > base_ai_count
+    final_reason = ai_reason if final_boosted else "normal_base_ratio"
 
     paper_id: Optional[str] = None
     if body.session_id and sess is not None:
         sid = str(body.session_id).strip()
         paper_meta = {
-            "seed_count": len([x for x in mixed if x.source == "seed"]),
-            "ai_count": len([x for x in mixed if x.source == "llm"]),
-            "ai_ratio": round(
-                len([x for x in mixed if x.source == "llm"]) / max(1, len(mixed)), 4
-            ),
+            "seed_count": final_seed_count,
+            "ai_count": final_ai_count,
+            "ai_ratio": round(final_ai_count / max(1, len(mixed)), 4),
             "ai_ratio_boosted": final_boosted,
             "ai_ratio_reason": final_reason,
             "seen_ratio_in_candidates": round(seen_ratio, 4),
@@ -995,6 +1252,11 @@ async def generate_paper_from_jd(
             "baseline_window": baseline_window,
             "topic_level_plan": dict(recommended_by_topic),
             "adjustment_reasons": list(adjustment_reasons),
+            "jd_plan_mode": "planner_selector",
+            "planner_notes": list(planner_notes),
+            "selector_notes": selector_notes,
+            "selector_candidate_count": len(candidate_items),
+            "program_fixes": list(program_fixes),
         }
         paper_id = create_paper(
             sid,
@@ -1007,11 +1269,6 @@ async def generate_paper_from_jd(
             at["paper_id"] = paper_id
             append_attempt(sid, at)
 
-    final_seed_count = len([x for x in mixed if x.source == "seed"])
-    final_ai_count = len([x for x in mixed if x.source == "llm"])
-    base_ai_count = max(1, body.count // JD_BASE_AI_RATIO_EVERY)
-    final_boosted = final_ai_count > base_ai_count
-    final_reason = ai_reason if final_boosted else "normal_base_ratio"
     return GeneratePaperFromJdResponse(
         paper_id=paper_id,
         questions=mixed,
@@ -1028,6 +1285,11 @@ async def generate_paper_from_jd(
             baseline_window=baseline_window,
             topic_level_plan=dict(recommended_by_topic),
             adjustment_reasons=list(adjustment_reasons),
+            jd_plan_mode="planner_selector",
+            planner_notes=list(planner_notes),
+            selector_notes=selector_notes,
+            selector_candidate_count=len(candidate_items),
+            program_fixes=list(program_fixes),
         ),
     )
 

@@ -128,7 +128,7 @@ class EvaluateAnswerResponse(BaseModel):
 
 
 class GeneratePaperFromJdRequest(BaseModel):
-    """根据 JD 纯文本在指定难度下量检索 Top-K 种子组卷（真题列表）。"""
+    """根据 JD 纯文本：向量检索候选 → LLM 规划 topic → LLM 从候选中选真题并规划 AI 槽位。"""
 
     jd_text: str = Field(..., min_length=40, description="职位描述纯文本，过短则 400")
     difficulty: str = Field(..., description="beginner / intermediate / advanced")
@@ -167,6 +167,26 @@ class PaperBuildMeta(BaseModel):
     baseline_window: int = 3
     topic_level_plan: dict[str, str] = Field(default_factory=dict)
     adjustment_reasons: List[str] = Field(default_factory=list)
+    jd_plan_mode: str = Field(
+        "planner_selector",
+        description="JD 组卷策略标识：planner_selector 为 LLM 规划 topic + LLM 选题。",
+    )
+    planner_notes: List[str] = Field(
+        default_factory=list,
+        description="Planner 对 topic 排序的简短说明。",
+    )
+    selector_notes: str = Field(
+        "",
+        description="Selector 组卷思路说明。",
+    )
+    selector_candidate_count: int = Field(
+        0,
+        description="送入 Selector 的候选真题条数。",
+    )
+    program_fixes: List[str] = Field(
+        default_factory=list,
+        description="程序对 Selector 输出做的校验与修正说明。",
+    )
 
 
 class PaperQuestion(BaseModel):

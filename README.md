@@ -2,14 +2,14 @@
 
 面向简历演示的**本地题库面试练习 MVP**：FastAPI + Next.js，出题支持 **真题（种子随机）** 与 **AI 生成题（结构化池少样本）**；评卷均为 **LLM rubric**。真题评卷锚定 **`question_id`**；AI 题锚定 **`generation_id`** 快照 + 抽样种子参考片段。**练习会话**：`POST /sessions`，出题可带 `session_id` 记录尝试（进程内存储，单实例）。
 
-**当前已实现**：`/generate-question`、`/generate-question-llm`、`/generate-paper-from-jd`（JD 文本 **Embedding** + 指定难度子集 **余弦 Top‑K 真题组卷**）、`/evaluate-answer`、`/sessions`。**启动时**对全库种子调用 `text-embedding-3-small` 建索引（需外网与 Key）。**评卷**仍为 **本题 canonical / AI 快照**，不把 JD 全文或检索邻居写入评卷 prompt。
+**当前已实现**：`/generate-question`、`/generate-question-llm`、`/generate-paper-from-jd`（JD **向量检索候选** + **LLM Planner** 白名单 topic 优先级 + **LLM Selector** 仅从候选 id 选题并规划 AI 槽位）、`/evaluate-answer`、`/sessions`。**启动时**对全库种子调用 `text-embedding-3-small` 建索引（需外网与 Key）。**评卷**仍为 **本题 canonical / AI 快照**，不把 JD 全文或检索邻居写入评卷 prompt。
 
 **路线图**：[docs/ROADMAP.md](docs/ROADMAP.md)（阶段 3 规则自适应与阶段 4 AI tutor 规划）。
 
 ## 项目叙事（可写进简历）
 
 - **端到端**：前后端分离单页流程；真题 / AI 题 / **JD 向量组卷**；评卷为 LLM rubric，**不**把向量邻居并入评卷。
-- **选题**：topic 随机；结构化池 + LLM 新题；**JD + 难度** 狭义 RAG 检索真题列表。
+- **选题**：topic 随机；结构化池 + LLM 新题；**JD** 为向量候选 + **双阶段 LLM**（规划 topic、从候选选题并定 AI 方向）。
 - **工程拆分**：`embedding_index`、`rag`、`prompts`、`session_store` / `generation_store`、`main`。
 - **刻意不做**：账号体系、生产数据库、部署流水线（见 `docs/MVP_SCOPE.md`）。
 

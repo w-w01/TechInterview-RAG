@@ -64,6 +64,11 @@ type PaperBuildMeta = {
   baseline_window: number;
   topic_level_plan: Record<string, string>;
   adjustment_reasons: string[];
+  jd_plan_mode?: string;
+  planner_notes?: string[];
+  selector_notes?: string;
+  selector_candidate_count?: number;
+  program_fixes?: string[];
 };
 
 type QuestionBundle =
@@ -488,6 +493,26 @@ export default function Home() {
                 {jdPaperMeta.adjustment_reasons?.length > 0 && (
                   <p className="mt-1">
                     调整依据：{jdPaperMeta.adjustment_reasons.join("；")}
+                  </p>
+                )}
+                {jdPaperMeta.selector_candidate_count != null &&
+                  jdPaperMeta.selector_candidate_count > 0 && (
+                    <p className="mt-1">
+                      送入选题模型的候选真题：{jdPaperMeta.selector_candidate_count} 道（仅允许从中选
+                      id）。
+                    </p>
+                  )}
+                {jdPaperMeta.planner_notes && jdPaperMeta.planner_notes.length > 0 && (
+                  <p className="mt-1">
+                    Planner：{jdPaperMeta.planner_notes.join("；")}
+                  </p>
+                )}
+                {jdPaperMeta.selector_notes && jdPaperMeta.selector_notes.trim() !== "" && (
+                  <p className="mt-1">Selector：{jdPaperMeta.selector_notes}</p>
+                )}
+                {jdPaperMeta.program_fixes && jdPaperMeta.program_fixes.length > 0 && (
+                  <p className="mt-1">
+                    程序校验：{jdPaperMeta.program_fixes.join("；")}
                   </p>
                 )}
               </div>

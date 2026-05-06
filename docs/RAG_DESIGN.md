@@ -25,16 +25,20 @@
 3. 将标签、难度与样条拼入 prompt，LLM 输出 JSON：`question`、`expected_key_points`。
 4. 服务端登记 **`generation_id` 快照**（题干、要点、抽样 `source_seed_ids`）；评卷时 **仅认快照题干**，参考块由这些种子重载。
 
-### C. JD 文本 RAG 组卷（已实现）
+### C. JD 文本 RAG 组卷（已实现：Planner + Selector）
 
 1. **索引构建（启动时）**：对每条种子将「Topics / Difficulty / Question / Reference answer / Key points」拼成文档文本（见 `embedding_index.doc_text_for_embedding`），批量调用 OpenAI **`text-embedding-3-small`**，向量 **L2 归一化** 后存入 **`numpy`** 矩阵（行与 `_seed_items` 下标对齐）。
-2. **组卷请求**：`POST /generate-paper-from-jd`，body 含 `jd_text`（最短约 40 字）、`difficulty`、`count`（1–20）。
-3. **检索**：JD 文本截断后嵌入；仅在 **同难度** 子集上与种子向量做 **内积（等价余弦）** 排序，取 Top‑`count`，**按 `id` 去重**。
-4. **混卷与解释**：响应返回 `questions`（真题 + AI 题）与 `meta`（AI 占比、是否提升、候选重复占比、补弱关键词等）。
-5. **试卷实体化**：若提供 `session_id`，后端会创建 `paper_id` 并将每道题以 `attempt` 形式归档到该试卷，便于后续做整卷统计与自适应策略。
-6. **去重策略**：同一会话内默认排除“已评估”题目（`score != null`）避免重复；AI 题按题干规范化去重（可容忍改写题语义重复用于巩固练习）。
-7. **评卷入口**：真题走 **`question_id`**，AI 题走 **`generation_id`**，均复用同一 rubric。
-8. **不做（仍）**：评卷阶段合并向量邻居或注入 JD 全文；JD PDF 上传（可后续）。
+2. **组卷请求**：`POST /generate-paper-from-jd`，body 含 `jd_text`（最短约 40 字）、`difficulty`、`count`（1–20）、`auto_adapt`、`session_id`（可选）。
+3. **向量检索（候选池）**：JD 截断后嵌入；在难度子集上（`auto_adapt=true` 时为 beginner/intermediate/advanced 三路）做 **余弦 Top‑K**，合并 **按 `id` 去重** 得到与 JD 相关的有序候选列表。
+4. **Planner（LLM）**：读取 JD 与 **topic 白名单**（`topic_allowlist.json`），只输出 JSON：`topic_priority`（合法 slug 数组，高→低）与 `notes`。若模型未给出合法 slug，则 **程序回退** 为「候选频次 + 会话弱点加权」排序（与旧规则一致，保证可组卷）。
+5. **候选送给 Selector**：按 Planner 的 topic 顺序从检索结果中 **分层抽样**（每 topic 条数上限、总条数上限见环境变量 `JD_CANDIDATE_PER_TOPIC`、`JD_SELECTOR_MAX_ITEMS`），每条含 `question_id`、题干、`topics`、难度、`key_points_preview`（缩短要点，省 token）。
+6. **Selector（LLM）**：在提示中注入 JD 摘要、topic 优先级、**真题道数 / AI 道数**、单 topic 真题上限、会话薄弱词、最近卷 **topic 推荐难度**（`topic_level_plan`），以及候选 JSON。**输出**仅允许使用候选中的 `question_id`；并输出 `ai_slots`（每道含 `topics` + `difficulty`），供后续 AI 出题。
+7. **程序校验**：剔除非法 id、去重、按单 topic 上限过滤与 **不足补齐**；规范 `ai_slots` 条数后，对每槽按标签与难度从池中 **少样本抽样** 调用既有 AI 出题逻辑，生成 `generation_id` 题。
+8. **混卷与解释**：响应 `questions`（真题 + AI 题交错）与 `meta`（含 `planner_notes`、`selector_notes`、`selector_candidate_count`、`program_fixes`、原 AI 占比与自适应字段等）。
+9. **试卷实体化**：若提供 `session_id`，创建 `paper_id` 并写入 `attempts`。
+10. **去重**：同会话已评估（`score != null`）的真题与题干 key 不参与新卷；AI 题重复题干会重试或真题补位。
+11. **评卷**：真题 `question_id`，AI 题 `generation_id`，rubric 不变。
+12. **仍不做**：评卷阶段向量扩召回；JD PDF 上传。
 
 ## 评卷如何工作（已实现）
 

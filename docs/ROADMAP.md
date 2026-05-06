@@ -11,15 +11,15 @@
 
 ## 阶段 2（已收口）
 
-- **JD 纯文本组卷（已实现）**：启动时对全库种子 **Embedding**（`text-embedding-3-small`），`POST /generate-paper-from-jd` 将 JD 嵌入后与 **指定难度** 子集做 **余弦 Top‑K**。
-- **混卷（已实现）**：一张卷内 **真题 + AI 题** 穿插，默认真题优先；仅在真题候选不足或重复率高时提升 AI 比例；返回 `meta` 解释字段。
+- **JD 纯文本组卷（已实现）**：启动 **Embedding** 全库种子；`POST /generate-paper-from-jd` 先做 **JD 向量检索候选**，再 **LLM Planner**（只输出白名单 `topic_priority`）→ **LLM Selector**（仅允许选择候选中的 `question_id`，并输出 `ai_slots`）→ 程序校验后 AI 出题与混卷；`meta` 含 `planner_notes`、`selector_notes`、`program_fixes` 等。
+- **混卷（已实现）**：真题 + AI 穿插；AI 道数仍由「真题优先 + 短缺抬升」规则决定；Selector 在固定槽位内指定 AI 考查 `topics`/`difficulty`。
 - **会话留档（已实现）**：SQLite 持久化；session 下显式 `paper` 实体 + `attempt` 明细，记录题目来源、分数与薄弱点；薄弱点用于后续补弱组卷。
 - **重复控制（已实现）**：同一会话内已评估过题目默认不重复进入新卷；AI 题按题干规范化去重。
 - **改进点（保留）**：当前“已答过”定义为 `score != null`（已评估）；可后续扩展为“已展开/已作答未评估”也计入已答集合。
 
 ## 阶段 3（规则版已实现）
 
-- **首卷覆盖策略**：`POST /generate-paper-from-jd` 在历史不足时优先覆盖多 topic + 多难度（beginner/intermediate/advanced），并保留随机性。
+- **与 JD 组卷联动**：`auto_adapt=true` 时检索跨三难度建候选；**最近 3 卷** 的 `topic_level_plan` 注入 **Selector** 提示词，供选题与 AI 槽位难度参考；`topic_priority` 以 **Planner** 为主（无合法输出时程序回退为频次+弱点排序）。
 - **最近3卷 baseline**：会话层按 topic 聚合最近 3 卷的均分、题量、难度分布、高低分次数，用于后续解释性调节。
 - **按 topic 自适应**：仅当“连续偏离”满足阈值（如连续高分/低分）才上调/下调该 topic 推荐难度，避免一次波动触发。
 - **解释接口**：新增 `GET /sessions/{session_id}/next-paper-plan` 返回 `topic_priority`、baseline 与推荐难度及原因。
