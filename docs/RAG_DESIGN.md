@@ -18,35 +18,52 @@
 3. 在候选池中 **`random.choice` 抽一题**，返回 `question_id`、题干、`expected_key_points` 等。
 4. **不使用** Embedding 或向量检索。
 
-### B. JD 文本 RAG 组卷（规划中，尚未编码）
+### B. AI 条件出题（已实现，非向量）
 
-**目标**：用户粘贴 **JD 纯文本**，仅用向量检索 ** assembly 试卷**，不改变评卷链路。
+1. 与随机真题 **相同的过滤池**（topic OR + 难度）。
+2. 从池中 **无放回随机抽样** 至多 `reference_max` 条（为 0 则不抽样）；池空则 **零样本**。
+3. 将标签、难度与样条拼入 prompt，LLM 输出 JSON：`question`、`expected_key_points`。
+4. 服务端登记 **`generation_id` 快照**（题干、要点、抽样 `source_seed_ids`）；评卷时 **仅认快照题干**，参考块由这些种子重载。
 
-1. **索引构建（启动时，实现后）**：对每条种子将「Topics / Difficulty / Question / Reference answer / Key points」拼成文档文本，批量调用 OpenAI **`text-embedding-3-small`**，向量 **L2 归一化** 后常驻内存（题库规模约 200，可用 numpy 矩阵批量余弦相似度，无需强制 FAISS）。
-2. **组卷请求**：`POST /generate-paper-from-jd`，body 含 `jd_text`、`difficulty`、`count`（含默认与上限，以实现为准）。
-3. **检索**：将 JD 文本（过长则截断）嵌入为查询向量；仅在 **`difficulty` 与请求一致** 的种子子集中计算相似度，按得分取 Top‑`count`，**按 `id` 去重**；若子集不足 `count` 则返回该子集按相似度排序的全部剩余题目。
-4. **响应**：返回与单次 **`/generate-question`** 同结构的题目列表，供前端选题并调用现有 **`/evaluate-answer`**。
-5. **不做**：用 LLM 先从 JD 抽取结构化技能再检索（可列为后续）；JD PDF 上传；评卷阶段合并向量邻居或注入 JD 全文。
+### C. JD 文本 RAG 组卷（已实现）
 
-## 评卷如何工作（仅本题，已实现）
+1. **索引构建（启动时）**：对每条种子将「Topics / Difficulty / Question / Reference answer / Key points」拼成文档文本（见 `embedding_index.doc_text_for_embedding`），批量调用 OpenAI **`text-embedding-3-small`**，向量 **L2 归一化** 后存入 **`numpy`** 矩阵（行与 `_seed_items` 下标对齐）。
+2. **组卷请求**：`POST /generate-paper-from-jd`，body 含 `jd_text`（最短约 40 字）、`difficulty`、`count`（1–20）。
+3. **检索**：JD 文本截断后嵌入；仅在 **同难度** 子集上与种子向量做 **内积（等价余弦）** 排序，取 Top‑`count`，**按 `id` 去重**。
+4. **混卷与解释**：响应返回 `questions`（真题 + AI 题）与 `meta`（AI 占比、是否提升、候选重复占比、补弱关键词等）。
+5. **试卷实体化**：若提供 `session_id`，后端会创建 `paper_id` 并将每道题以 `attempt` 形式归档到该试卷，便于后续做整卷统计与自适应策略。
+6. **去重策略**：同一会话内默认排除“已评估”题目（`score != null`）避免重复；AI 题按题干规范化去重（可容忍改写题语义重复用于巩固练习）。
+7. **评卷入口**：真题走 **`question_id`**，AI 题走 **`generation_id`**，均复用同一 rubric。
+8. **不做（仍）**：评卷阶段合并向量邻居或注入 JD 全文；JD PDF 上传（可后续）。
 
-1. 请求必须携带 **`question_id`**，且 **`topics`** 与题目自身 `topics` 标签 **有交集**；并校验 `difficulty`、`question` 文本与种子一致。
-2. **不向量化、不检索**：将 **canonical 本题一条** 的题干与参考答案拼成 `reference_block`，将本题 **`key_points`** 拼成 `key_points_block`（无其它条目合并）。**JD 组卷交付的题目仍走同一评卷逻辑**。
-3. 使用 `prompts.EVALUATION_SYSTEM_PROMPT` 定义 rubric 与输出 JSON 字段约束。
-4. 调用 `gpt-4o-mini`，`response_format=json_object`，服务端解析并校验 `score` 在 0–10。
+## 评卷如何工作（已实现）
+
+### 真题（`question_id`）
+
+1. **`topics`** 与题目自身标签 **有交集**；校验 `difficulty`、`question` 与种子一致。
+2. **canonical 单条**：`reference_block` 与 `key_points_block` 仅来自本题种子。
+
+### AI 题（`generation_id`）
+
+1. 校验快照存在且 **`question` / `difficulty` 与快照一致**；`topics` 与快照标签有交集。
+2. `key_points_block` 来自出题时 LLM 给出的要点；`reference_block` 由 **`source_seed_ids`** 对应种子重拼（零样本时可为空说明）。
+
+真题与 AI 题均使用 `prompts.EVALUATION_SYSTEM_PROMPT` 与 `gpt-4o-mini` 的 JSON 评卷解析，**0–10** 分。
 
 ## 引用 / 证据如何产生
 
 - **`/generate-question`**：`reference_snippets` 固定为空列表。
-- **`/evaluate-answer`**：`reference_evidence` 仅为 **本题** 对应的引用片段列表（长度 1），与 prompt 同源。
+- **`/generate-question-llm`**：`reference_snippets` 为本次少样本抽样的种子片段。
+- **`/evaluate-answer`**：真题 `reference_evidence` 为 **单条** canonical；AI 题为 **多条** 抽样种子片段（零样本时可为空列表）。
 
-## 健康检查字段说明（现状与规划）
+## 健康检查字段说明
 
-- **`rag_index_ready`**（已实现）：题库已成功加载且条目非空。
-- **`embedding_index_ready`**（**规划**，代码落地后）：JD 组卷用 embedding 矩阵 / 索引是否已成功构建；与 `rag_index_ready` 分列，避免「有无向量索引」语义混淆。
+- **`rag_index_ready`**：题库已成功加载且条目非空。
+- **`embedding_index_ready`**：启动时种子 **Embedding 矩阵** 是否已成功构建（失败则 JD 组卷接口返回 503）。
 
 ## 后续可改进方向
 
 - JD 经 LLM 压缩为查询向量或与关键词检索混合。
 - 题目在检索约束下的生成并做安全过滤。
 - 评估指标与人工标注对齐。
+- “已答过”集合当前按 `score != null` 定义，可扩展为“已展开/已作答未评估”亦计入，避免用户中断后重复。

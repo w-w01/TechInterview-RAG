@@ -47,6 +47,28 @@ class QuestionBank:
             return None
         return random.choice(pool)
 
+    def pool_for_topics_and_difficulty(
+        self, selected_topics: List[str], difficulty: str
+    ) -> List[Dict[str, Any]]:
+        """与 pick_question 相同过滤条件，返回全部候选（用于 AI 少样本抽样）。"""
+        want = {str(t).strip().lower() for t in selected_topics if str(t).strip()}
+        if not want:
+            return []
+        return [
+            it
+            for it in self._items
+            if _item_topic_slugs(it) & want
+            and str(it.get("difficulty", "")).strip() == difficulty.strip()
+        ]
+
+    @staticmethod
+    def sample_pool_items(pool: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
+        """从候选池无放回随机抽至多 k 条；k<=0 或空池返回空列表。"""
+        if k <= 0 or not pool:
+            return []
+        n = min(k, len(pool))
+        return random.sample(pool, n)
+
 
 # 兼容旧名：main 等模块仍引用 rag = QuestionBank()
 RAGService = QuestionBank
