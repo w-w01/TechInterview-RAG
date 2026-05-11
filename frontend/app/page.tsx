@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2 } from "lucide-react";
+import { TutorMarkdown } from "@/components/tutor-markdown";
 
 const DIFFICULTIES = ["beginner", "intermediate", "advanced"] as const;
 
@@ -1444,9 +1445,15 @@ export default function Home() {
                         <p className="text-xs font-medium text-muted-foreground">
                           {t.role === "user" ? "你" : "Tutor"}
                         </p>
-                        <p className="mt-1 whitespace-pre-wrap leading-relaxed">
-                          {t.content}
-                        </p>
+                        {t.role === "user" ? (
+                          <p className="mt-1 whitespace-pre-wrap leading-relaxed">
+                            {t.content}
+                          </p>
+                        ) : (
+                          <div className="mt-1 text-sm leading-relaxed [&_*]:break-words">
+                            <TutorMarkdown content={t.content} />
+                          </div>
+                        )}
                       </div>
                     ))
                   )}

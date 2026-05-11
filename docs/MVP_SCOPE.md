@@ -21,15 +21,16 @@
 
 ### AI Tutor（已实现，MVP 级）
 
-- 会话路径：`POST /sessions/{session_id}/tutor/learning-plan`（含 `plan_days`、JD 侧重点推断字段）、`/tutor/chat`；依赖 OpenAI Chat JSON 模式，**不做**服务端请求限流（个人本地演示，见 README）。
+- 会话路径：`POST /sessions/{session_id}/tutor/learning-plan`（含 `plan_days`、JD 侧重点推断字段）、`POST /sessions/{session_id}/tutor/chat`（一次性 JSON）、`POST /sessions/{session_id}/tutor/chat/stream`（**SSE** 流式；学习页默认）。依赖 OpenAI Chat / Embedding，**不做**服务端请求限流（个人本地演示，见 README）。
+- 学习页 Tutor **助手**消息以 **Markdown** 展示（`react-markdown` + GFM + 消毒）；用户消息仍为纯文本。
 - **非目标**：个人后台、账号体系、资料爬虫与长期学习档案（见下节）。
 
-### LangChain 知识库 RAG（规划中，非当前 MVP）
+### LangChain 知识库 RAG（学习向：核心已纳入 MVP）
 
-- 计划把用户已收集的 IT 面试“八股”文章整理为独立知识库，使用 LangChain 做文档加载、清洗后分块、Embedding 与向量检索。
-- 该知识库优先服务 **Tutor 引用式答疑**、**学习计划资料绑定**、**评卷后推荐阅读** 与 **薄弱点复测**，不替代现有题库 seed。
-- **评卷边界不变**：默认评卷仍只基于本题 canonical / AI generation snapshot；知识库检索结果不直接进入评分 prompt，避免引入不稳定或不一致的评分依据。
-- **多语言**：会话偏好、知识库 chunk 语种 metadata、检索与 Tutor 答复语言策略的设计说明见 [RAG_DESIGN.md](RAG_DESIGN.md)；流式 Tutor 输出规划见同文「流式输出」节。
+- **已实现**：规范化文档摄入（`POST /knowledge/documents`）、启动时 FAISS 索引、**Tutor** 检索 + stuff 链（可选 `use_knowledge_rag`）、调试检索 `POST /knowledge/search`；与题库 seed 的 JD 组卷向量索引分离。
+- **仍属增强 / 未做全**：成体系 ETL 流水线、学习计划内嵌阅读、**评卷后推荐阅读** 独立接口、薄弱点复测命题等（不替代现有题库 seed）。
+- **评卷边界不变**：默认评卷仍只基于本题 canonical / AI generation snapshot；知识库检索结果不直接进入评分 prompt。
+- **多语言与流式**：见 [RAG_DESIGN.md](RAG_DESIGN.md)「多语言与答复语言控制」「流式输出」。
 
 ## 非目标（刻意不做）
 

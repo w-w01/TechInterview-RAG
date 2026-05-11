@@ -154,27 +154,19 @@
 - 知识库可以用于**评卷后的解释、推荐与学习**；若未来用于出题，应在题目来源中明确标记为 `knowledge` 或类似来源。
 - LangChain 主要承担文档加载、分块、向量库与检索链路；JD Planner / Selector 的程序校验与业务约束仍保留自定义实现。
 
-## 流式输出（规划）
+## 流式输出
 
-当前后端 LLM 调用均为 **`chat.completions.create` 非流式**，且多数路由使用 **`response_format: json_object`**，适合一次性解析，**不适合**直接作为首屏流式体验目标。
+### Tutor（已实现，P0）
 
-### 优先接入流式的接口与代码位置
+- **路由**：`POST /sessions/{session_id}/tutor/chat/stream`，响应 `text/event-stream`（SSE）。**一次性 JSON** 仍保留：`POST .../tutor/chat`（`backend/app/main.py` 中 `tutor_chat`）。
+- **载荷**：每帧 `data: <JSON>\n\n`，`type` 为 `meta`（RAG 路径：引用与 query 改写元数据） / `delta`（`text` 正文增量） / `done`（`suggested_followups`） / `error`。
+- **后端**：RAG 路径在流式前完成 query 改写与检索；正文由 LangChain stuff 链 `astream` 或 OpenAI `stream=True`（非 RAG）写出。详见 `KnowledgeRAGService.stream_answer_with_stuff`、`tutor_chat_stream`。
+- **前端**：`frontend/app/page.tsx` 中 `onTutorSend` 使用 **`fetch` + `ReadableStream`** 解析 SSE（非 `EventSource`，因请求体为 POST JSON）。首 token 前保留「正在回复」态；助手气泡正文由 **`react-markdown`**（`components/tutor-markdown.tsx`，GFM + `rehype-sanitize`）渲染。
 
-| 优先级 | 场景 | 现有路由 / 代码 | 说明 |
-|--------|------|-----------------|------|
-| **P0** | Tutor 对话正文 | `POST /sessions/{session_id}/tutor/chat`；`backend/app/main.py` 中 `_run_tutor_json_llm` 及对应路由；前端 `frontend/app/page.tsx` 的 `onTutorSend`（`fetch` + `res.json()`） | 用户感知最强。可新增 **`tutor/chat/stream`**（如 SSE）流式输出 **Markdown 正文**；`suggested_followups` 可在流结束后以尾部事件或第二次轻量请求返回，或改为非 JSON 流 + 文末结构化块（需约定分隔符）。 |
-| **P1** | 学习计划中的长文 | `POST /sessions/{session_id}/tutor/learning-plan`；同上文件中学习计划解析逻辑 | 可对 **`jd_priority_guess_markdown`** 或逐日 `focus` 做流式；整体仍为强 JSON 时，可拆成「先流式 narrative、再补全结构化 days」两阶段。 |
-| **P2** | 评卷反馈长文 | `POST /evaluate-answer`；`_run_evaluation_llm` | 评卷依赖完整 JSON（分数、weak_topics 等）；若要做流式，宜 **先流式「讲解/改进建议」文本，再单独请求或尾部 JSON** 解析结构化字段，复杂度高于 Tutor。 |
-| **暂缓** | AI 出题、JD Planner、JD Selector | `generate-question-llm`、`_jd_run_topic_planner`、`_jd_run_paper_selector`、`_generate_llm_question_from_samples` | 强依赖完整 JSON，流式对前端收益低、增量解析成本高。 |
+### 仍为非流式 / 规划中
 
-### 前端改造要点（规划）
-
-- **Tutor**：将 `onTutorSend` 从单次 `fetch`+`json()` 改为 **`ReadableStream` / `EventSource`（SSE）** 消费；边读边追加 `reply_markdown` 到当前助手气泡，结束后再写入 `suggested_followups` 与 `tutorTurns` 历史。  
-- **加载态**：已有「Tutor 正在回复…」；流式下可保留 **首 token 前** 的 loading，之后以光标或打字效果展示。  
-- **CORS**：若 SSE 跨域，需与现有 FastAPI `CORSMiddleware` 配置一致。
-
-### 后端改造要点（规划）
-
-- 使用 OpenAI **`stream=True`** 的 chat completions（或兼容的 Responses API，以届时 SDK 为准）；对 **仅 Markdown** 的路由直接转发 token/delta。  
-- 需 **保留会话校验、知识库检索（若已接入）在流式开始前完成**，避免首包延迟不可控。  
-- JSON 类路由若不做流式，保持现状即可，避免双路径维护成本。
+| 优先级 | 场景 | 路由 / 代码 | 说明 |
+|--------|------|------------|------|
+| **P1** | 学习计划长文 | `POST /sessions/{session_id}/tutor/learning-plan` | 可对 `jd_priority_guess_markdown` 等做流式；当前仍为完整 JSON。 |
+| **P2** | 评卷反馈长文 | `POST /evaluate-answer` | 强依赖完整 JSON；若要做流式需拆分结构化字段与讲解文本。 |
+| **暂缓** | AI 出题、JD Planner、JD Selector | 若干 `generate-*` / JD 路由 | 强依赖 JSON，流式收益低。 |
