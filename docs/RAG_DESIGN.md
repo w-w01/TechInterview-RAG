@@ -118,7 +118,7 @@
 `/sessions/{session_id}/tutor/chat` 已接入统一知识库检索问答链路，核心如下：
 
 1. **索引对象**：`backend/data/knowledge/documents/**.json`（不拆中英文库）。
-2. **分块**：`RecursiveCharacterTextSplitter` 按标题/段落优先切分。
+2. **分块**：`RecursiveCharacterTextSplitter` 按标题/段落优先切分；**每个分块在嵌入前拼接 `Title: {title}` 与正文**，使标题概括与查询语义对齐（非单独关键词倒排，仍是向量检索）。
 3. **向量库**：OpenAI `text-embedding-3-small` + 本地 `FAISS`（进程启动构建）。
 4. **问答链**：LangChain `create_stuff_documents_chain`（stuff）。
 5. **查询前处理**：全 LLM `query rewrite`（意图识别 + 改写），支持：
@@ -128,8 +128,9 @@
    - `multi_intent`
    - `rhetorical`
    - `direct`
-6. **语言策略**：单次检索，不做失败后二次跨语言重搜；依赖多语 embedding 的跨语种语义相似能力。保留 `lang` metadata 便于后续升级。
-7. **返回信息**：除回复正文外，附带 `query_type`、`rewritten_query`、`rewrite_confidence` 与文档 `citations`。
+6. **子库过滤**：请求可带 `corpus_id`（与落盘子目录一致）；**不按 `topic_slugs` 过滤**——该字段主要服务题库白名单，知识库元数据易与文章实际主题不一致。
+7. **语言策略**：单次检索，不做失败后二次跨语言重搜；依赖多语 embedding 的跨语种语义相似能力。保留 `lang` metadata 便于后续升级。
+8. **返回信息**：除回复正文外，附带 `query_type`、`rewritten_query`、`retrieval_queries`、`retrieved_chunks`、`rewrite_confidence` 与文档 `citations`。调试可用 `POST /knowledge/search`。
 
 ### 知识库数据流（规划）
 
@@ -138,7 +139,7 @@
 3. **LangChain 分块**：使用文档加载器与 `RecursiveCharacterTextSplitter`，尽量按标题层级切分，避免把不同概念混在同一 chunk。
 4. **Metadata**：每个 chunk 至少保留 `chunk_id`、`title`、`source`、`topic_slug`、`tags`、`difficulty`、`section_path`、**`lang`（或 `primary_lang`：zh / en / mixed）** 等字段，便于引用、过滤与多语言检索重排（见上文「多语言与答复语言控制」）。
 5. **向量索引**：先用本地 FAISS / Chroma + OpenAI Embeddings；知识库索引与现有 `seed_embedding_index` 分离。
-6. **检索 API**：规划 `POST /knowledge/search`，输入 query、topic、top_k，输出 snippets + metadata，供调试与前端引用展示。
+6. **检索 API**：已实现 `POST /knowledge/search`（`query`、`top_k`、可选 `corpus_id`），输出 snippets + metadata。
 
 ### 可接入功能（规划）
 

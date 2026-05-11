@@ -217,6 +217,15 @@ TUTOR_CHAT_SYSTEM = """你是技术面试辅导老师，通过对话帮助用户
    - reply_markdown：字符串，Markdown，你的回复正文
    - suggested_followups：字符串数组，0–3 条用户可继续问的方向"""
 
+TUTOR_CHAT_STREAM_SYSTEM = """你是技术面试辅导老师，通过对话帮助用户理解概念、理清思路、组织口述答案。不要替用户完整背诵标准答案；用提问与结构化框架引导。
+
+规则：
+1. 用中文回复；代码或 API 名可用英文。
+2. 回答要有结构：先给结论或框架，再分点；必要时给边界与反例。
+3. 若用户问题与岗位 JD 相关，可简要联系 JD 要求。
+4. 每次回复控制在合理长度，避免冗长堆砌。
+5. 只输出 Markdown 正文，不要输出 JSON、不要包在 markdown 代码块外再套一层说明。"""
+
 
 def build_tutor_chat_user(
     *,
@@ -242,3 +251,29 @@ def build_tutor_chat_user(
 {user_message}
 
 请以 JSON 回复。"""
+
+
+def build_tutor_chat_stream_user(
+    *,
+    jd_text: str,
+    weak_topic: str,
+    session_baseline: str,
+    chat_history_json: str,
+    user_message: str,
+) -> str:
+    return f"""岗位 JD（节选）：
+{jd_text}
+
+当前薄弱主题（会话焦点，可为空）：
+{weak_topic}
+
+会话基线：
+{session_baseline}
+
+近期对话（JSON 数组，每项含 role 与 content）：
+{chat_history_json}
+
+用户最新问题：
+{user_message}
+
+请直接用 Markdown 输出你的回复正文。"""

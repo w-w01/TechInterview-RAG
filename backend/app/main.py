@@ -7,12 +7,14 @@ import uuid
 from collections import Counter
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, AsyncIterator, Dict, List, Optional, Set, Tuple
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
+from starlette.requests import Request
 
 from .data_loader import load_interview_seed
 from .knowledge_documents import (
@@ -29,12 +31,14 @@ from .prompts import (
     GENERATION_SYSTEM_PROMPT,
     JD_PLANNER_SYSTEM_PROMPT,
     JD_SELECTOR_SYSTEM_PROMPT,
+    TUTOR_CHAT_STREAM_SYSTEM,
     TUTOR_CHAT_SYSTEM,
     TUTOR_LEARNING_PLAN_SYSTEM,
     build_evaluation_user_prompt,
     build_generation_user_prompt,
     build_jd_planner_user_prompt,
     build_jd_selector_user_prompt,
+    build_tutor_chat_stream_user,
     build_tutor_chat_user,
     build_tutor_learning_plan_user,
 )
@@ -53,6 +57,9 @@ from .schemas import (
     GenerateQuestionRequest,
     GenerateQuestionResponse,
     HealthResponse,
+    KnowledgeSearchHit,
+    KnowledgeSearchRequest,
+    KnowledgeSearchResponse,
     KnowledgeDocumentIngestRequest,
     KnowledgeDocumentIngestResponse,
     NextPaperPlanResponse,
@@ -125,6 +132,7 @@ JD_SEEN_RATIO_HIGH = _env_float("JD_SEEN_RATIO_HIGH", 0.8, min_v=0.0, max_v=1.0)
 JD_SHORTFALL_EXTRA_DIV = _env_int("JD_SHORTFALL_EXTRA_DIV", 2, min_v=1)
 JD_CANDIDATE_PER_TOPIC = _env_int("JD_CANDIDATE_PER_TOPIC", 12, min_v=4)
 JD_SELECTOR_MAX_ITEMS = _env_int("JD_SELECTOR_MAX_ITEMS", 96, min_v=20)
+KNOWLEDGE_RAG_TOP_K = _env_int("KNOWLEDGE_RAG_TOP_K", 6, min_v=1)
 QUERY_REWRITE_MODEL = os.getenv("QUERY_REWRITE_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
 _topic_entries: List[Dict[str, str]] = load_topic_allowlist()
@@ -232,10 +240,30 @@ def _cors_middleware_params() -> Dict[str, Any]:
 app.add_middleware(CORSMiddleware, **_cors_middleware_params())
 
 
+@app.middleware("http")
+async def _log_incoming_request(request: Request, call_next):
+    """记录进入应用的请求；若此处仍无日志，说明 TCP 未打到本进程（代理/端口/防火墙）。"""
+    logger.info("收到 HTTP 请求 %s %s", request.method, request.url.path)
+    return await call_next(request)
+
+
 def _snippet_from_item(it: Dict[str, Any]) -> ReferenceSnippet:
     body = f"Q: {it.get('question', '')}\n\nReference: {it.get('answer', '')}"
     src = str(it.get("source") or "manually curated seed data")
     return ReferenceSnippet(source=src, content=body[:4000])
+
+
+def _doc_snippet(text: str, max_len: int = 220) -> str:
+    """生成检索调试用片段预览（去掉嵌入用的 Title 前缀，避免与 hit.title 重复）。"""
+    raw = str(text or "").strip()
+    if raw.startswith("Title:"):
+        sep = raw.find("\n\n")
+        if sep != -1:
+            raw = raw[sep + 2 :].strip()
+    s = " ".join(raw.split())
+    if len(s) <= max_len:
+        return s
+    return s[:max_len] + "…"
 
 
 def _item_by_id(question_id: str) -> Optional[Dict[str, Any]]:
@@ -529,9 +557,37 @@ async def health() -> HealthResponse:
         status="ok",
         rag_index_ready=rag.ready,
         embedding_index_ready=seed_embedding_index.ready,
+        knowledge_rag_ready=knowledge_rag.ready,
+        knowledge_rag_chunks=knowledge_rag.doc_count,
         seed_items=len(_seed_items),
         message="InterviewMate RAG backend",
     )
+
+
+@app.post("/knowledge/search", response_model=KnowledgeSearchResponse)
+async def knowledge_search(body: KnowledgeSearchRequest) -> KnowledgeSearchResponse:
+    """知识库检索调试接口。"""
+    if not knowledge_rag.ready:
+        raise HTTPException(status_code=503, detail="Knowledge RAG 索引未就绪。")
+    cid = str(body.corpus_id or "").strip() or None
+    docs = await knowledge_rag.retrieve(
+        body.query.strip(), top_k=body.top_k, corpus_id=cid
+    )
+    hits: List[KnowledgeSearchHit] = []
+    for d in docs:
+        md = d.metadata or {}
+        hits.append(
+            KnowledgeSearchHit(
+                score=None,
+                source=str(md.get("source_url") or ""),
+                title=str(md.get("title") or ""),
+                corpus_id=str(md.get("corpus_id") or ""),
+                doc_id=str(md.get("doc_id") or ""),
+                lang=str(md.get("lang") or ""),
+                snippet=_doc_snippet(d.page_content),
+            )
+        )
+    return KnowledgeSearchResponse(query=body.query.strip(), hit_count=len(hits), hits=hits)
 
 
 @app.post(
@@ -1650,6 +1706,46 @@ def _extract_tutor_chat_payload(data: Dict[str, Any]) -> TutorChatResponse:
     return TutorChatResponse(reply_markdown=reply, suggested_followups=sug[:5])
 
 
+def _sse_data(obj: Dict[str, Any]) -> bytes:
+    """SSE 单帧：data 行 + 空行。"""
+    return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n".encode("utf-8")
+
+
+async def _run_tutor_followups_llm(*, user_message: str, assistant_reply: str) -> List[str]:
+    """流式 Tutor 正文结束后，轻量 JSON 调用生成 suggested_followups。"""
+    model = "gpt-4o-mini"
+    completion = await _get_openai().chat.completions.create(
+        model=model,
+        response_format={"type": "json_object"},
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "你只输出合法 JSON，不要 markdown 代码块。"
+                    '格式：{"suggested_followups":["..."]}，数组含 0–3 条中文短句，'
+                    "为用户可继续追问的方向。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"用户问题：{user_message}\n\n助手回复（节选）：\n{assistant_reply[:4000]}"
+                ),
+            },
+        ],
+        temperature=0.35,
+    )
+    raw = completion.choices[0].message.content or "{}"
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    sug_raw = data.get("suggested_followups", [])
+    if not isinstance(sug_raw, list):
+        return []
+    return [str(x).strip() for x in sug_raw if str(x).strip()][:5]
+
+
 async def _run_evaluation_llm(
     *,
     req_topics: List[str],
@@ -1876,6 +1972,8 @@ async def tutor_chat(session_id: str, body: TutorChatRequest) -> TutorChatRespon
         hist_payload = hist_payload[-24:]
     jd_line = (body.jd_text or "").strip() or "(本次未提供 JD)"
     if body.use_knowledge_rag and knowledge_rag.ready:
+        top_k = int(body.top_k or KNOWLEDGE_RAG_TOP_K)
+        rag_corpus = str(body.corpus_id or "").strip() or None
         rewrite_result = await rewrite_query_with_llm(
             _get_openai(),
             conversation_history=hist_payload,
@@ -1891,7 +1989,11 @@ async def tutor_chat(session_id: str, body: TutorChatRequest) -> TutorChatRespon
         )
         docs_all = []
         for q in retrieval_queries:
-            docs_all.extend(await knowledge_rag.retrieve(q, top_k=body.top_k))
+            docs_all.extend(
+                await knowledge_rag.retrieve(
+                    q, top_k=top_k, corpus_id=rag_corpus
+                )
+            )
         # 以 metadata + 内容片段去重，控制 stuff 上下文规模。
         dedup_docs = []
         seen_doc_keys: Set[str] = set()
@@ -1905,7 +2007,7 @@ async def tutor_chat(session_id: str, body: TutorChatRequest) -> TutorChatRespon
                 continue
             seen_doc_keys.add(k)
             dedup_docs.append(d)
-            if len(dedup_docs) >= body.top_k:
+            if len(dedup_docs) >= top_k:
                 break
         answer_markdown, cites_raw = await knowledge_rag.answer_with_stuff(
             query=rewrite_result.rewritten_query,
@@ -1919,6 +2021,8 @@ async def tutor_chat(session_id: str, body: TutorChatRequest) -> TutorChatRespon
             citations=citations,
             query_type=rewrite_result.query_type,
             rewritten_query=rewrite_result.rewritten_query,
+            retrieval_queries=retrieval_queries,
+            retrieved_chunks=len(dedup_docs),
             rewrite_confidence=rewrite_result.confidence,
         )
 
@@ -1931,3 +2035,134 @@ async def tutor_chat(session_id: str, body: TutorChatRequest) -> TutorChatRespon
     )
     raw = await _run_tutor_json_llm(system=TUTOR_CHAT_SYSTEM, user=user_prompt)
     return _extract_tutor_chat_payload(raw)
+
+
+@app.post("/sessions/{session_id}/tutor/chat/stream")
+async def tutor_chat_stream(session_id: str, body: TutorChatRequest) -> StreamingResponse:
+    """Tutor 对话 SSE：delta 流式正文，done 带 suggested_followups；RAG 路径先发 meta。"""
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="未知的 session_id。")
+    for turn in body.history:
+        r = str(turn.role or "").strip().lower()
+        if r not in ("user", "assistant"):
+            raise HTTPException(
+                status_code=400, detail="history 中 role 只能是 user 或 assistant",
+            )
+    hist_payload: List[Dict[str, str]] = [
+        {"role": str(t.role).strip().lower(), "content": str(t.content)}
+        for t in body.history
+    ]
+    if len(hist_payload) > 24:
+        hist_payload = hist_payload[-24:]
+    jd_line = (body.jd_text or "").strip() or "(本次未提供 JD)"
+
+    async def event_gen() -> AsyncIterator[bytes]:
+        try:
+            if body.use_knowledge_rag and knowledge_rag.ready:
+                top_k = int(body.top_k or KNOWLEDGE_RAG_TOP_K)
+                rag_corpus = str(body.corpus_id or "").strip() or None
+                rewrite_result = await rewrite_query_with_llm(
+                    _get_openai(),
+                    conversation_history=hist_payload,
+                    current_query=body.user_message.strip(),
+                    locale_mode=body.locale_mode,
+                    model=QUERY_REWRITE_MODEL,
+                )
+                retrieval_queries = (
+                    rewrite_result.sub_queries
+                    if rewrite_result.query_type == "multi_intent" and rewrite_result.sub_queries
+                    else [rewrite_result.rewritten_query]
+                )
+                docs_all: List[Any] = []
+                for q in retrieval_queries:
+                    docs_all.extend(
+                        await knowledge_rag.retrieve(
+                            q, top_k=top_k, corpus_id=rag_corpus
+                        )
+                    )
+                dedup_docs: List[Any] = []
+                seen_doc_keys: Set[str] = set()
+                for d in docs_all:
+                    md = d.metadata or {}
+                    k = (
+                        f"{md.get('corpus_id', '')}:{md.get('doc_id', '')}:"
+                        f"{md.get('title', '')}:{d.page_content[:80]}"
+                    )
+                    if k in seen_doc_keys:
+                        continue
+                    seen_doc_keys.add(k)
+                    dedup_docs.append(d)
+                    if len(dedup_docs) >= top_k:
+                        break
+                cites_raw = KnowledgeRAGService._format_citations(dedup_docs)
+                yield _sse_data(
+                    {
+                        "type": "meta",
+                        "citations": cites_raw,
+                        "query_type": rewrite_result.query_type,
+                        "rewritten_query": rewrite_result.rewritten_query,
+                        "retrieval_queries": retrieval_queries,
+                        "retrieved_chunks": len(dedup_docs),
+                        "rewrite_confidence": rewrite_result.confidence,
+                    }
+                )
+                if not dedup_docs:
+                    no_ctx = (
+                        "当前知识库未检索到足够上下文，建议你补充更具体的技术对象、场景或约束条件。"
+                        if rewrite_result.language in ("zh", "mixed")
+                        else "No sufficient knowledge context was retrieved. Please provide more specific technical scope."
+                    )
+                    yield _sse_data({"type": "delta", "text": no_ctx})
+                    yield _sse_data({"type": "done", "suggested_followups": []})
+                    return
+                async for piece in knowledge_rag.stream_answer_with_stuff(
+                    query=rewrite_result.rewritten_query,
+                    docs=dedup_docs,
+                    answer_language=rewrite_result.language,
+                ):
+                    yield _sse_data({"type": "delta", "text": piece})
+                yield _sse_data({"type": "done", "suggested_followups": []})
+                return
+
+            user_prompt = build_tutor_chat_stream_user(
+                jd_text=jd_line,
+                weak_topic=_resolve_weak_topic(sess, body.weak_topic),
+                session_baseline=_session_baseline_text(sess),
+                chat_history_json=json.dumps(hist_payload, ensure_ascii=False),
+                user_message=body.user_message.strip(),
+            )
+            stream = await _get_openai().chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": TUTOR_CHAT_STREAM_SYSTEM},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.35,
+                stream=True,
+            )
+            full_reply: List[str] = []
+            async for event in stream:
+                delta = event.choices[0].delta
+                if delta.content:
+                    full_reply.append(delta.content)
+                    yield _sse_data({"type": "delta", "text": delta.content})
+            reply_text = "".join(full_reply).strip()
+            followups = await _run_tutor_followups_llm(
+                user_message=body.user_message.strip(),
+                assistant_reply=reply_text or "(无正文)",
+            )
+            yield _sse_data({"type": "done", "suggested_followups": followups[:5]})
+        except Exception as e:
+            logger.exception("Tutor chat stream 失败")
+            yield _sse_data({"type": "error", "message": str(e)})
+
+    return StreamingResponse(
+        event_gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

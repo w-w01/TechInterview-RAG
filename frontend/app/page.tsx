@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -99,6 +99,8 @@ type TutorPlanResponse = {
   tips: string[];
 };
 
+type TutorTurn = { id: string; role: string; content: string };
+
 type QuestionDraftState = {
   answer: string;
   evaluation: EvaluateResponse | null;
@@ -134,11 +136,11 @@ export default function Home() {
   const [planDays, setPlanDays] = useState(5);
   const [learnPlan, setLearnPlan] = useState<TutorPlanResponse | null>(null);
   const [loadingPlan, setLoadingPlan] = useState(false);
-  const [tutorTurns, setTutorTurns] = useState<
-    { role: string; content: string }[]
-  >([]);
+  const [tutorTurns, setTutorTurns] = useState<TutorTurn[]>([]);
   const [tutorInput, setTutorInput] = useState("");
   const [tutorLoading, setTutorLoading] = useState(false);
+  /** 首条 delta 前为 true，用于顶栏「正在回复」与占位，避免与流式气泡重复 */
+  const [tutorStreamPriming, setTutorStreamPriming] = useState(false);
   const [tutorFollowups, setTutorFollowups] = useState<string[]>([]);
   const [learnQuizTopics, setLearnQuizTopics] = useState<string[]>([
     "general_programming",
@@ -213,6 +215,35 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  /** 与 state 同步，避免连续点击时在 setState 生效前重复创建会话 */
+  const sessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  /** 页面加载时 /sessions 可能失败（后端未起、API 地址错误）；在首次需要会话时再试一次 */
+  const ensureSessionId = useCallback(async (): Promise<string | null> => {
+    if (sessionIdRef.current) {
+      return sessionIdRef.current;
+    }
+    try {
+      const res = await fetch(`${apiBase()}/sessions`, { method: "POST" });
+      if (!res.ok) {
+        return null;
+      }
+      const data = (await res.json()) as { session_id: string };
+      const sid = data.session_id?.trim();
+      if (!sid) {
+        return null;
+      }
+      sessionIdRef.current = sid;
+      setSessionId(sid);
+      return sid;
+    } catch {
+      return null;
+    }
   }, []);
 
   const labelForSlug = useCallback(
@@ -450,14 +481,16 @@ export default function Home() {
   }, [answer, questionBundle, sessionTopics, sessionId]);
 
   const onGenerateLearnQuiz = useCallback(async () => {
-    if (!sessionId) {
-      setError("缺少会话，请刷新页面重试。");
-      return;
-    }
     setError(null);
     setLearnQuizEval(null);
     setLoadingLearnQuizGen(true);
     try {
+      const sid = await ensureSessionId();
+      if (!sid) {
+        throw new Error(
+          "无法创建练习会话，请确认后端已启动（默认 http://127.0.0.1:8000）与 NEXT_PUBLIC_API_URL。",
+        );
+      }
       const res = await fetch(`${apiBase()}/generate-question-llm`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -465,7 +498,7 @@ export default function Home() {
           topics: learnQuizTopics,
           difficulty,
           reference_max: 5,
-          session_id: sessionId,
+          session_id: sid,
         }),
       });
       if (!res.ok) {
@@ -483,10 +516,10 @@ export default function Home() {
     } finally {
       setLoadingLearnQuizGen(false);
     }
-  }, [learnQuizTopics, difficulty, sessionId]);
+  }, [learnQuizTopics, difficulty, ensureSessionId]);
 
   const onEvaluateLearnQuiz = useCallback(async () => {
-    if (!sessionId || !learnQuizBundle || learnQuizBundle.mode !== "llm") {
+    if (!learnQuizBundle || learnQuizBundle.mode !== "llm") {
       setError("请先生成小测题目。");
       return;
     }
@@ -501,6 +534,12 @@ export default function Home() {
     setError(null);
     setLoadingLearnQuizEval(true);
     try {
+      const sid = await ensureSessionId();
+      if (!sid) {
+        throw new Error(
+          "无法创建练习会话，请确认后端已启动与 NEXT_PUBLIC_API_URL。",
+        );
+      }
       const res = await fetch(`${apiBase()}/evaluate-answer`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -510,7 +549,7 @@ export default function Home() {
           topics: learnQuizSessionTopics,
           difficulty: learnQuizBundle.data.difficulty,
           generation_id: learnQuizBundle.data.generation_id,
-          session_id: sessionId,
+          session_id: sid,
         }),
       });
       if (!res.ok) {
@@ -529,14 +568,10 @@ export default function Home() {
     learnQuizAnswer,
     learnQuizBundle,
     learnQuizSessionTopics,
-    sessionId,
+    ensureSessionId,
   ]);
 
   const onTutorPlan = useCallback(async () => {
-    if (!sessionId) {
-      setError("缺少会话，请刷新页面重试。");
-      return;
-    }
     if (jdText.trim().length < 40) {
       setError("学习计划需要 JD 不少于约 40 字。");
       return;
@@ -544,8 +579,14 @@ export default function Home() {
     setError(null);
     setLoadingPlan(true);
     try {
+      const sid = await ensureSessionId();
+      if (!sid) {
+        throw new Error(
+          "无法创建练习会话，请确认后端已启动（默认 http://127.0.0.1:8000）与 NEXT_PUBLIC_API_URL。",
+        );
+      }
       const res = await fetch(
-        `${apiBase()}/sessions/${sessionId}/tutor/learning-plan`,
+        `${apiBase()}/sessions/${sid}/tutor/learning-plan`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -568,31 +609,51 @@ export default function Home() {
     } finally {
       setLoadingPlan(false);
     }
-  }, [sessionId, jdText, learnWeakTopic, planDays]);
+  }, [ensureSessionId, jdText, learnWeakTopic, planDays]);
 
   const onTutorSend = useCallback(async () => {
-    if (!sessionId) {
-      setError("缺少会话，请刷新页面重试。");
-      return;
-    }
     const msg = tutorInput.trim();
     if (!msg) return;
     setError(null);
     setTutorLoading(true);
+    setTutorStreamPriming(true);
     setTutorFollowups([]);
+    const userId = crypto.randomUUID();
+    const assistantId = crypto.randomUUID();
+    const historyPayload = tutorTurns.map((t) => ({
+      role: t.role,
+      content: t.content,
+    }));
+    setTutorTurns((prev) => [
+      ...prev,
+      { id: userId, role: "user", content: msg },
+      { id: assistantId, role: "assistant", content: "" },
+    ]);
+    setTutorInput("");
+    const rollbackTurns = () => {
+      setTutorTurns((prev) => prev.slice(0, -2));
+    };
     try {
-      const historyPayload = tutorTurns.map((t) => ({
-        role: t.role,
-        content: t.content,
-      }));
+      const sid = await ensureSessionId();
+      if (!sid) {
+        rollbackTurns();
+        setTutorInput(msg);
+        setError(
+          "无法创建练习会话，请确认后端已启动（默认 http://127.0.0.1:8000）与 NEXT_PUBLIC_API_URL。",
+        );
+        setTutorLoading(false);
+        setTutorStreamPriming(false);
+        return;
+      }
       const res = await fetch(
-        `${apiBase()}/sessions/${sessionId}/tutor/chat`,
+        `${apiBase()}/sessions/${sid}/tutor/chat/stream`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             jd_text: jdText.trim(),
             weak_topic: learnWeakTopic.trim(),
+            use_knowledge_rag: true,
             history: historyPayload,
             user_message: msg,
           }),
@@ -600,25 +661,65 @@ export default function Home() {
       );
       if (!res.ok) {
         const text = await res.text();
+        rollbackTurns();
         throw new Error(text || res.statusText);
       }
-      const data = (await res.json()) as {
-        reply_markdown: string;
-        suggested_followups: string[];
-      };
-      setTutorTurns((prev) => [
-        ...prev,
-        { role: "user", content: msg },
-        { role: "assistant", content: data.reply_markdown },
-      ]);
-      setTutorInput("");
-      setTutorFollowups(data.suggested_followups ?? []);
+      const reader = res.body?.getReader();
+      if (!reader) {
+        rollbackTurns();
+        throw new Error("无法读取响应流");
+      }
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        for (;;) {
+          const sep = buffer.indexOf("\n\n");
+          if (sep < 0) break;
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          if (!frame.startsWith("data: ")) continue;
+          let payload: { type?: string; text?: string; message?: string; suggested_followups?: string[] };
+          try {
+            payload = JSON.parse(frame.slice(6)) as typeof payload;
+          } catch {
+            continue;
+          }
+          const ev = payload.type;
+          if (ev === "delta" && typeof payload.text === "string") {
+            setTutorStreamPriming(false);
+            setTutorTurns((prev) => {
+              const next = [...prev];
+              const last = next[next.length - 1];
+              if (last?.role === "assistant") {
+                next[next.length - 1] = {
+                  ...last,
+                  content: last.content + payload.text,
+                };
+              }
+              return next;
+            });
+          } else if (ev === "done") {
+            setTutorFollowups(
+              Array.isArray(payload.suggested_followups)
+                ? payload.suggested_followups
+                : [],
+            );
+          } else if (ev === "error") {
+            rollbackTurns();
+            throw new Error(payload.message || "Tutor 流式输出失败");
+          }
+        }
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Tutor 对话失败");
     } finally {
       setTutorLoading(false);
+      setTutorStreamPriming(false);
     }
-  }, [sessionId, jdText, learnWeakTopic, tutorInput, tutorTurns]);
+  }, [ensureSessionId, jdText, learnWeakTopic, tutorInput, tutorTurns]);
 
   const selectClass =
     "flex h-10 w-full max-w-md rounded-md border border-input bg-background px-3 py-2 text-sm shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50";
@@ -635,7 +736,7 @@ export default function Home() {
 
   const learnLoadingLabel = loadingPlan
     ? "正在推断 JD 侧重点并生成学习计划…"
-    : tutorLoading
+    : tutorStreamPriming
       ? "Tutor 正在回复…"
       : loadingLearnQuizGen
         ? "正在生成小测题…"
@@ -1246,9 +1347,7 @@ export default function Home() {
                     type="button"
                     variant="secondary"
                     onClick={onTutorPlan}
-                    disabled={
-                      loadingPlan || !sessionId || jdText.trim().length < 40
-                    }
+                    disabled={loadingPlan || jdText.trim().length < 40}
                   >
                     {loadingPlan ? "生成中…" : "生成学习计划"}
                   </Button>
@@ -1333,9 +1432,9 @@ export default function Home() {
                   {tutorTurns.length === 0 ? (
                     <p className="text-muted-foreground">尚无消息，在下方输入后发送。</p>
                   ) : (
-                    tutorTurns.map((t, i) => (
+                    tutorTurns.map((t) => (
                       <div
-                        key={`${i}-${t.role}-${t.content.slice(0, 12)}`}
+                        key={t.id}
                         className={
                           t.role === "user"
                             ? "rounded-md bg-background/80 p-2"
@@ -1351,7 +1450,7 @@ export default function Home() {
                       </div>
                     ))
                   )}
-                  {tutorLoading && (
+                  {tutorLoading && tutorStreamPriming && (
                     <div className="flex items-center gap-2 rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
                       <Loader2 className="size-4 animate-spin shrink-0" />
                       <span>Tutor 正在组织回复…</span>
@@ -1382,7 +1481,7 @@ export default function Home() {
                     type="button"
                     className="sm:self-end"
                     onClick={onTutorSend}
-                    disabled={tutorLoading || !sessionId}
+                    disabled={tutorLoading}
                   >
                     {tutorLoading ? "发送中…" : "发送"}
                   </Button>
@@ -1439,7 +1538,7 @@ export default function Home() {
                     type="button"
                     onClick={onGenerateLearnQuiz}
                     disabled={
-                      loadingLearnQuizGen || !sessionId || learnQuizTopics.length === 0
+                      loadingLearnQuizGen || learnQuizTopics.length === 0
                     }
                   >
                     {loadingLearnQuizGen ? "出题中…" : "生成小测题"}

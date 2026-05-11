@@ -197,6 +197,7 @@ Content-Type: application/json
   "locale_mode": "auto",
   "use_knowledge_rag": true,
   "top_k": 6,
+  "corpus_id": "",
   "history": [],
   "user_message": "什么是 CAS？"
 }
@@ -204,8 +205,19 @@ Content-Type: application/json
 
 说明：
 - `locale_mode`：`auto / zh / en / mixed`，默认 `auto`。
+- `corpus_id`：可选，限定子库（如 `advanced_java`）；空字符串表示全库检索。
+- 索引构建时每个分块会带上 `Title: …` 前缀再嵌入，便于标题概括与正文一起被语义命中；**不按 `topic_slugs` 过滤**（该字段主要服务题库标签，知识库侧易不一致）。
 - 当前策略为**单知识库单次检索**（不做失败后二次跨语言重搜）；依赖多语 embedding 的跨语种语义对齐能力。
-- 响应中附带 `query_type`、`rewritten_query`、`rewrite_confidence` 与 `citations`（知识库引用元信息）。
+- 响应中附带 `query_type`、`rewritten_query`、`retrieval_queries`、`retrieved_chunks`、`rewrite_confidence` 与 `citations`（知识库引用元信息）。
+
+知识库检索调试：
+
+```http
+POST http://127.0.0.1:8000/knowledge/search
+Content-Type: application/json
+
+{"query": "redis 主从复制断点续传机制", "top_k": 6, "corpus_id": "advanced_java"}
+```
 
 前端首页顶栏可切换 **答题** / **学习**（学习计划可选天数）；**个人后台**不在本 MVP 中展示或开发。
 

@@ -188,6 +188,10 @@ class TutorChatRequest(BaseModel):
         le=20,
         description="知识库检索召回条数。",
     )
+    corpus_id: str = Field(
+        "",
+        description="可选；限定知识库子库（如 advanced_java），空表示全库。",
+    )
     history: List[TutorChatTurn] = Field(
         default_factory=list,
         description="不含本轮用户消息的既往对话。",
@@ -219,7 +223,40 @@ class TutorChatResponse(BaseModel):
     citations: List[TutorCitation] = Field(default_factory=list)
     query_type: Optional[str] = None
     rewritten_query: Optional[str] = None
+    retrieval_queries: List[str] = Field(default_factory=list)
+    retrieved_chunks: int = 0
     rewrite_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+
+class KnowledgeSearchRequest(BaseModel):
+    """知识库检索调试请求。"""
+
+    query: str = Field(..., min_length=1)
+    top_k: int = Field(6, ge=1, le=20)
+    corpus_id: str = Field(
+        "",
+        description="可选；与 Tutor 一致，限定子库。",
+    )
+
+
+class KnowledgeSearchHit(BaseModel):
+    """知识库检索命中项。"""
+
+    score: Optional[float] = None
+    source: str
+    title: str
+    corpus_id: str
+    doc_id: str
+    lang: str = ""
+    snippet: str
+
+
+class KnowledgeSearchResponse(BaseModel):
+    """知识库检索调试响应。"""
+
+    query: str
+    hit_count: int
+    hits: List[KnowledgeSearchHit] = Field(default_factory=list)
 
 
 class GeneratePaperFromJdRequest(BaseModel):
@@ -307,6 +344,14 @@ class HealthResponse(BaseModel):
     embedding_index_ready: bool = Field(
         ...,
         description="JD 组卷用种子向量索引是否已构建。",
+    )
+    knowledge_rag_ready: bool = Field(
+        ...,
+        description="Tutor 知识库 RAG 索引是否已构建。",
+    )
+    knowledge_rag_chunks: int = Field(
+        0,
+        description="知识库 RAG 的分块数量。",
     )
     seed_items: int
     message: Optional[str] = None
