@@ -2,7 +2,7 @@
 
 from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ReferenceSnippet(BaseModel):
@@ -174,16 +174,52 @@ class TutorChatTurn(BaseModel):
 class TutorChatRequest(BaseModel):
     jd_text: str = Field("", description="可为空；空则提示词中标注未提供 JD。")
     weak_topic: str = ""
+    locale_mode: str = Field(
+        "auto",
+        description="答复语言模式：auto / zh / en / mixed。",
+    )
+    use_knowledge_rag: bool = Field(
+        True,
+        description="是否启用知识库检索问答链路。",
+    )
+    top_k: int = Field(
+        6,
+        ge=1,
+        le=20,
+        description="知识库检索召回条数。",
+    )
     history: List[TutorChatTurn] = Field(
         default_factory=list,
         description="不含本轮用户消息的既往对话。",
     )
     user_message: str = Field(..., min_length=1)
 
+    @field_validator("locale_mode", mode="before")
+    @classmethod
+    def normalize_locale_mode(cls, v: Any) -> str:
+        s = str(v or "").strip().lower() or "auto"
+        if s not in ("auto", "zh", "en", "mixed"):
+            raise ValueError("locale_mode 只能是 auto / zh / en / mixed")
+        return s
+
+
+class TutorCitation(BaseModel):
+    """Tutor 知识库引用信息。"""
+
+    source: str
+    title: str
+    corpus_id: str
+    doc_id: str
+    lang: str = ""
+
 
 class TutorChatResponse(BaseModel):
     reply_markdown: str
     suggested_followups: List[str] = Field(default_factory=list)
+    citations: List[TutorCitation] = Field(default_factory=list)
+    query_type: Optional[str] = None
+    rewritten_query: Optional[str] = None
+    rewrite_confidence: Optional[float] = Field(default=None, ge=0.0, le=1.0)
 
 
 class GeneratePaperFromJdRequest(BaseModel):
@@ -336,3 +372,65 @@ class NextPaperPlanResponse(BaseModel):
     topic_baseline: dict[str, Any] = Field(default_factory=dict)
     recommended_difficulty_by_topic: dict[str, str] = Field(default_factory=dict)
     reasons: List[str] = Field(default_factory=list)
+
+
+# --- 知识库文档摄入（n8n 等；不落向量、不分块） ---
+
+
+class KnowledgeDocumentSource(BaseModel):
+    """文档来源元数据。"""
+
+    type: str = Field(..., description="例如 github")
+    url: str
+    license_note: str = ""
+
+
+class KnowledgeDocumentExtra(BaseModel):
+    """流水线附加字段（均可选，便于不同上游）。"""
+
+    original_filename: Optional[str] = None
+    original_path: Optional[str] = None
+    github_sha: Optional[str] = None
+    github_repo: Optional[str] = None
+    github_branch: Optional[str] = None
+    cleaning_version: Optional[str] = None
+
+
+class KnowledgeDocumentIngestRequest(BaseModel):
+    """POST /knowledge/documents 请求体（与 n8n 约定 JSON 对齐）。"""
+
+    record_type: str = Field("document", description="须为 document")
+    doc_id: str
+    title: str
+    body: str
+    body_format: str = Field("markdown", description="当前仅支持 markdown")
+    lang: str = "en"
+    source: KnowledgeDocumentSource
+    corpus_id: str
+    topic_slugs: List[str] = Field(default_factory=list)
+    extra: KnowledgeDocumentExtra = Field(default_factory=KnowledgeDocumentExtra)
+
+    @field_validator("corpus_id", "doc_id", mode="before")
+    @classmethod
+    def strip_path_segments(cls, v: Any) -> Any:
+        """去除首尾空白，与落盘路径段一致。"""
+        if isinstance(v, str):
+            return v.strip()
+        return v
+
+    @model_validator(mode="after")
+    def validate_record_and_format(self) -> "KnowledgeDocumentIngestRequest":
+        if str(self.record_type).strip() != "document":
+            raise ValueError("record_type 必须为 document")
+        if str(self.body_format).strip().lower() != "markdown":
+            raise ValueError("body_format 当前仅支持 markdown")
+        return self
+
+
+class KnowledgeDocumentIngestResponse(BaseModel):
+    """摄入成功后的简要回执。"""
+
+    corpus_id: str
+    doc_id: str
+    saved_path: str = Field(..., description="相对 backend 目录的 POSIX 路径")
+    overwritten: bool = False

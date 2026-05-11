@@ -31,7 +31,27 @@
 - **Tutor 对话**：`POST /sessions/{id}/tutor/chat`，结构化 JSON 回复 + 建议追问方向。
 - **前端**：顶栏 **答题 | 学习**；学习区为计划/对话与 **AI 小测**（复用 `generate-question-llm` + 评卷）；异步请求时有加载提示。
 - **保留/后续**：资料外链推荐、进步曲线、与个人后台（本阶段**不开发**、入口隐藏）等可后续扩展。
+- **规划（文档）**：多语言与答复语言控制、前端流式输出接入点见 [RAG_DESIGN.md](RAG_DESIGN.md)（「多语言与答复语言控制」「流式输出」）。
 
 ## 横切增强（已实现）
 
 - 评卷 JSON 含 **`study_topics`**，与 Tutor、学习区展示联动。
+
+## 阶段 5（规划：LangChain 知识库 RAG）
+
+目标：把已收集的 IT 面试“八股”文章整理为**可追溯的学习知识库**，作为当前题库 / JD RAG 之外的第二类 RAG。该层重点服务学习、解释、推荐与复测，**不默认进入评卷 prompt**，避免检索噪声影响 rubric 稳定性。
+
+- **知识库 ETL**：新增原始资料目录与入库脚本，支持 Markdown / txt / HTML 等文章；清洗标题、正文、代码块与来源信息，保留 `title`、`source`、`topic_slug`、`difficulty`、`tags`、`updated_at` 等 metadata。
+- **LangChain 分块与索引**：使用 LangChain 文档加载器与 `RecursiveCharacterTextSplitter`；通过 OpenAI Embeddings 建立知识库向量索引（可先用本地 FAISS / Chroma，后续再替换存储）。索引与现有 seed embedding 分离，避免“题库候选检索”和“学习资料检索”职责混杂。
+- **知识库检索 API**：规划 `POST /knowledge/search`，输入 query / topic / top_k，输出带来源的 chunks；用于调试召回质量与前端引用展示。
+- **Tutor 引用式答疑**：`/sessions/{id}/tutor/chat` 可先检索知识库，再把 cited snippets 注入 Tutor prompt；响应扩展 citations，前端展示“参考来源”。
+- **评卷后推荐阅读**：基于 `/evaluate-answer` 的 `study_topics` / `weak_topics` 检索相关文章，规划独立推荐接口（例如 `POST /sessions/{id}/knowledge/recommend`），把“评卷结果”接到“下一步阅读”。
+- **学习计划资料绑定**：`/tutor/learning-plan` 在 JD 侧重点推断后检索高相关知识库片段，让每日任务附推荐阅读 / 复述任务 / 小测建议，减少纯 LLM 泛化计划。
+- **知识点掌握图谱（后续）**：将 topic 白名单、题库 seed、知识库 chunks 与用户弱点关联，形成 topic -> 子知识点 -> 文章 -> 相关题目的学习路径。
+- **多语言**：知识库 chunk 的 `lang` / `primary_lang` 与会话 `locale_mode`、检索过滤策略见 [RAG_DESIGN.md](RAG_DESIGN.md)。
+
+边界原则：
+
+- **JD RAG** 仍主要用于组卷：输入 JD，检索面试题 seed，进入 Planner / Selector。
+- **Knowledge RAG** 用于学习：输入弱点、学习问题或 Tutor query，检索八股知识文章。
+- **Grading** 仍锚定 canonical / generation snapshot；知识库只用于评卷后的讲解、推荐阅读或明确标记的“知识库生成题”。

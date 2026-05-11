@@ -2,17 +2,18 @@
 
 面向简历演示的**本地题库面试练习 MVP**：FastAPI + Next.js，出题支持 **真题（种子随机）** 与 **AI 生成题（结构化池少样本）**；评卷均为 **LLM rubric**。真题评卷锚定 **`question_id`**；AI 题锚定 **`generation_id`** 快照 + 抽样种子参考片段。**练习会话**：`POST /sessions`，出题可带 `session_id`；会话与试卷记录存本地 **SQLite**（题库仍为 JSON 种子）。
 
-**当前已实现**：`/generate-question`、`/generate-question-llm`、`/generate-paper-from-jd`（JD **向量检索候选** + **LLM Planner** 白名单 topic 优先级 + **LLM Selector** 仅从候选 id 选题并规划 AI 槽位）、`/evaluate-answer`（含 **`study_topics`** 建议学习方向）、`/sessions`、**AI Tutor**：`POST /sessions/{id}/tutor/learning-plan`（含 **`plan_days`** 与 JD **侧重点推断** `jd_priority_guess_markdown`）、`/tutor/chat`。**启动时**对全库种子调用 `text-embedding-3-small` 建索引（需外网与 Key）。**评卷**仍为 **本题 canonical / AI 快照**，不把 JD 全文或检索邻居写入评卷 prompt。
+**当前已实现**：`/generate-question`、`/generate-question-llm`、`/generate-paper-from-jd`（JD **向量检索候选** + **LLM Planner** 白名单 topic 优先级 + **LLM Selector** 仅从候选 id 选题并规划 AI 槽位）、`/evaluate-answer`（含 **`study_topics`** 建议学习方向）、`/sessions`、**AI Tutor**：`POST /sessions/{id}/tutor/learning-plan`（含 **`plan_days`** 与 JD **侧重点推断** `jd_priority_guess_markdown`）、`/tutor/chat`。Tutor 对话已接入 **LangChain + FAISS + stuff 问答链**（统一知识库，支持中英混合数据），并在检索前执行 **全 LLM query 改写（含意图识别）**。**启动时**对全库种子调用 `text-embedding-3-small` 建索引（需外网与 Key）。**评卷**仍为 **本题 canonical / AI 快照**，不把 JD 全文或检索邻居写入评卷 prompt。
 
 **限流**：本仓库为**个人本地演示**，服务端**不实现** API 限流；若对外暴露请自行在网关或托管平台配置。
 
-**路线图**：[docs/ROADMAP.md](docs/ROADMAP.md)（阶段 3 规则自适应与阶段 4 AI tutor 规划）。
+**路线图**：[docs/ROADMAP.md](docs/ROADMAP.md)（阶段 3 规则自适应、阶段 4 AI Tutor、后续 LangChain 知识库 RAG 规划）。
 
 ## 项目叙事（可写进简历）
 
 - **端到端**：前后端分离单页流程；真题 / AI 题 / **JD 向量组卷**；评卷为 LLM rubric，**不**把向量邻居并入评卷。
 - **选题**：topic 随机；结构化池 + LLM 新题；**JD** 为向量候选 + **双阶段 LLM**（规划 topic、从候选选题并定 AI 方向）。
 - **工程拆分**：`embedding_index`、`rag`、`prompts`、`session_store` / `generation_store`、`main`。
+- **规划中**：引入 **LangChain 知识库 RAG**，对自有 IT 面试“八股”文章做清洗、分块、元数据标注、向量索引与引用式检索，用于 Tutor 答疑、学习计划资料绑定、评卷后推荐阅读；评卷主链路仍锚定 canonical / 快照，不默认接入知识库检索。
 - **刻意不做**：账号体系、生产数据库、部署流水线（见 `docs/MVP_SCOPE.md`）。
 
 ## 数据与题库格式
@@ -30,7 +31,7 @@ python scripts\etl_kaggle_to_seed.py
 
 ## 技术栈
 
-- **后端**：FastAPI、Pydantic、OpenAI API（Chat：出题 + 评卷；**Embedding**：启动建索引 + JD 查询）、numpy、本地 JSON 题库。
+- **后端**：FastAPI、Pydantic、OpenAI API（Chat：出题 + 评卷 + query 改写；**Embedding**：启动建索引 + JD 查询 + 知识库向量化）、numpy、LangChain、FAISS、本地 JSON 题库。
 - **前端**：Next.js（App Router）、React、TypeScript、Tailwind CSS、shadcn/ui。
 
 ## 仓库结构
@@ -58,6 +59,20 @@ copy .env.example .env
 # 编辑 .env，填入 OPENAI_API_KEY
 uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
+
+**本地知识摄入 API（供 n8n Cloud 等联调）**
+
+1. 按上文安装依赖并启动 FastAPI（默认监听 `127.0.0.1:8000`）。
+2. 浏览器打开交互文档：<http://127.0.0.1:8000/docs>，可调试 `POST /knowledge/documents` 与 `GET /knowledge/documents/{corpus_id}/{doc_id}`。
+3. 将本机服务暴露给公网（开发期）：安装 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/) 后执行：
+
+```powershell
+cloudflared tunnel --url http://localhost:8000
+```
+
+终端会打印形如 `https://xxxx.trycloudflare.com` 的 HTTPS 地址；后端已配置 CORS，允许 `https://*.trycloudflare.com`（正则匹配 Quick Tunnel 子域）、`http://localhost:5678`（n8n 默认本地 UI），以及原前端地址。若 n8n 或其它工具的 `Origin` 仍被拒绝，可在 `backend/.env` 中设置 `APP_ENV=development` 或 `DEV_CORS_ALLOW_ALL=true`（此时允许任意 Origin，详见 `.env.example`）。
+
+4. 在 n8n 中将 **HTTP Request** 等节点的 base URL 设为上述 `https://xxxx.trycloudflare.com`（即 `api_base_url`），路径例如 `POST /knowledge/documents`。文档写入目录：`backend/data/knowledge/documents/{corpus_id}/{doc_id}.json`；默认同路径已存在时返回 **409**，需加查询参数 `overwrite=true` 才覆盖。`corpus_id` 即子目录名，用于按知识库筛选；仓库 **Backend-Engineers-Guide** 的已摄入文档在 **`backend_engineers_guide`**，其它知识库请使用新的 `corpus_id`（同一 API 与目录规则）。
 
 - 健康检查：<http://127.0.0.1:8000/health>（`rag_index_ready`：题库非空；`embedding_index_ready`：种子向量索引已构建。）
 - Topic 列表：<http://127.0.0.1:8000/topics>
@@ -176,8 +191,21 @@ Content-Type: application/json
 POST http://127.0.0.1:8000/sessions/{session_id}/tutor/chat
 Content-Type: application/json
 
-{"jd_text": "", "weak_topic": "", "history": [], "user_message": "什么是 CAS？"}
+{
+  "jd_text": "",
+  "weak_topic": "",
+  "locale_mode": "auto",
+  "use_knowledge_rag": true,
+  "top_k": 6,
+  "history": [],
+  "user_message": "什么是 CAS？"
+}
 ```
+
+说明：
+- `locale_mode`：`auto / zh / en / mixed`，默认 `auto`。
+- 当前策略为**单知识库单次检索**（不做失败后二次跨语言重搜）；依赖多语 embedding 的跨语种语义对齐能力。
+- 响应中附带 `query_type`、`rewritten_query`、`rewrite_confidence` 与 `citations`（知识库引用元信息）。
 
 前端首页顶栏可切换 **答题** / **学习**（学习计划可选天数）；**个人后台**不在本 MVP 中展示或开发。
 
@@ -185,7 +213,7 @@ Content-Type: application/json
 
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 分阶段目标（JD 组卷、自适应等）
 - [docs/MVP_SCOPE.md](docs/MVP_SCOPE.md) — 目标、范围、非目标、局限
-- [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md) — 数据加载、选题与评卷、JD RAG 组卷（已实现）
+- [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md) — 数据加载、选题与评卷、JD RAG 组卷（已实现）；**多语言策略**与**流式输出规划**见文内专节
 - [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) — 题库 JSON 字段与白名单
 
 ## 截图

@@ -10,11 +10,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from openai import AsyncOpenAI
 
 from .data_loader import load_interview_seed
+from .knowledge_documents import (
+    document_json_path,
+    load_document_json,
+    relative_document_path,
+    save_document_json,
+)
+from .knowledge_rag import KnowledgeRAGService
 from .embedding_index import seed_embedding_index
 from .generation_store import GenerationSnapshot, get_snapshot, put_snapshot
 from .prompts import (
@@ -32,6 +39,7 @@ from .prompts import (
     build_tutor_learning_plan_user,
 )
 from .rag import RAGService, _item_topic_slugs
+from .query_rewrite import rewrite_query_with_llm
 from .schemas import (
     CreateSessionResponse,
     EvaluateAnswerRequest,
@@ -45,6 +53,8 @@ from .schemas import (
     GenerateQuestionRequest,
     GenerateQuestionResponse,
     HealthResponse,
+    KnowledgeDocumentIngestRequest,
+    KnowledgeDocumentIngestResponse,
     NextPaperPlanResponse,
     PracticeAttemptEntry,
     PracticePaperEntry,
@@ -54,6 +64,7 @@ from .schemas import (
     TopicsListResponse,
     TutorChatRequest,
     TutorChatResponse,
+    TutorCitation,
     TutorLearningPlanRequest,
     TutorLearningPlanResponse,
     TutorPlanDay,
@@ -114,11 +125,15 @@ JD_SEEN_RATIO_HIGH = _env_float("JD_SEEN_RATIO_HIGH", 0.8, min_v=0.0, max_v=1.0)
 JD_SHORTFALL_EXTRA_DIV = _env_int("JD_SHORTFALL_EXTRA_DIV", 2, min_v=1)
 JD_CANDIDATE_PER_TOPIC = _env_int("JD_CANDIDATE_PER_TOPIC", 12, min_v=4)
 JD_SELECTOR_MAX_ITEMS = _env_int("JD_SELECTOR_MAX_ITEMS", 96, min_v=20)
+QUERY_REWRITE_MODEL = os.getenv("QUERY_REWRITE_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
 _topic_entries: List[Dict[str, str]] = load_topic_allowlist()
 ALLOWED_SLUGS: Set[str] = {e["slug"] for e in _topic_entries}
 
 rag = RAGService()
+knowledge_rag = KnowledgeRAGService(
+    docs_root=Path(__file__).resolve().parent.parent / "data" / "knowledge" / "documents"
+)
 _openai_client: Optional[AsyncOpenAI] = None
 _seed_items: List[Dict[str, Any]] = []
 
@@ -175,17 +190,46 @@ async def lifespan(app: FastAPI):
     validate_seed_against_allowlist(_seed_items, ALLOWED_SLUGS)
     rag.load_items(_seed_items)
     await seed_embedding_index.build(_seed_items, _get_openai())
+    await knowledge_rag.build()
     yield
 
 
 app = FastAPI(title="InterviewMate RAG", version="0.1.0", lifespan=lifespan)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+
+
+def _cors_middleware_params() -> Dict[str, Any]:
+    """
+    开发联调 CORS：
+    - 默认：前端、n8n 本地 UI、Cloudflare Quick Tunnel 子域（正则）。
+    - DEV_CORS_ALLOW_ALL=true：允许任意 Origin（此时关闭 credentials，符合浏览器规范）。
+    """
+    dev_all = (
+        os.getenv("DEV_CORS_ALLOW_ALL", "").strip().lower() in ("1", "true", "yes")
+        or os.getenv("APP_ENV", "").strip().lower() == "development"
+    )
+    if dev_all:
+        return {
+            "allow_origins": ["*"],
+            "allow_credentials": False,
+            "allow_methods": ["*"],
+            "allow_headers": ["*"],
+        }
+    params: Dict[str, Any] = {
+        "allow_origins": [
+            "http://localhost:3000",
+            "http://127.0.0.1:3000",
+            "http://localhost:5678",
+            "http://127.0.0.1:5678",
+        ],
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+        "allow_origin_regex": r"https?://[\w-]+\.trycloudflare\.com",
+    }
+    return params
+
+
+app.add_middleware(CORSMiddleware, **_cors_middleware_params())
 
 
 def _snippet_from_item(it: Dict[str, Any]) -> ReferenceSnippet:
@@ -488,6 +532,60 @@ async def health() -> HealthResponse:
         seed_items=len(_seed_items),
         message="InterviewMate RAG backend",
     )
+
+
+@app.post(
+    "/knowledge/documents",
+    response_model=KnowledgeDocumentIngestResponse,
+    status_code=201,
+)
+async def ingest_knowledge_document(
+    body: KnowledgeDocumentIngestRequest,
+    overwrite: bool = Query(
+        False,
+        description="为 true 时允许覆盖已存在的同路径 JSON；默认 false 冲突返回 409。",
+    ),
+) -> KnowledgeDocumentIngestResponse:
+    """接收规范化文档 JSON 并落盘；不做分块、嵌入与检索。"""
+    try:
+        path = document_json_path(body.corpus_id, body.doc_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    existed = path.is_file()
+    payload: Dict[str, Any] = body.model_dump(mode="json")
+    try:
+        save_document_json(
+            body.corpus_id, body.doc_id, payload, overwrite=overwrite
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except FileExistsError:
+        raise HTTPException(
+            status_code=409,
+            detail="同 corpus_id 与 doc_id 的文档已存在；附加查询参数 overwrite=true 可覆盖。",
+        ) from None
+    return KnowledgeDocumentIngestResponse(
+        corpus_id=body.corpus_id,
+        doc_id=body.doc_id,
+        saved_path=relative_document_path(body.corpus_id, body.doc_id),
+        overwritten=bool(existed and overwrite),
+    )
+
+
+@app.get("/knowledge/documents/{corpus_id}/{doc_id}")
+async def get_knowledge_document(corpus_id: str, doc_id: str) -> Dict[str, Any]:
+    """读取已保存的文档 JSON，用于联调校验。"""
+    try:
+        return load_document_json(corpus_id, doc_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="文档不存在。") from None
+    except json.JSONDecodeError as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"已存文件不是合法 JSON: {e}",
+        ) from e
 
 
 @app.post("/sessions", response_model=CreateSessionResponse)
@@ -1777,6 +1875,53 @@ async def tutor_chat(session_id: str, body: TutorChatRequest) -> TutorChatRespon
     if len(hist_payload) > 24:
         hist_payload = hist_payload[-24:]
     jd_line = (body.jd_text or "").strip() or "(本次未提供 JD)"
+    if body.use_knowledge_rag and knowledge_rag.ready:
+        rewrite_result = await rewrite_query_with_llm(
+            _get_openai(),
+            conversation_history=hist_payload,
+            current_query=body.user_message.strip(),
+            locale_mode=body.locale_mode,
+            model=QUERY_REWRITE_MODEL,
+        )
+        # 多意图优先拆分检索，其他类型按单条改写查询检索。
+        retrieval_queries = (
+            rewrite_result.sub_queries
+            if rewrite_result.query_type == "multi_intent" and rewrite_result.sub_queries
+            else [rewrite_result.rewritten_query]
+        )
+        docs_all = []
+        for q in retrieval_queries:
+            docs_all.extend(await knowledge_rag.retrieve(q, top_k=body.top_k))
+        # 以 metadata + 内容片段去重，控制 stuff 上下文规模。
+        dedup_docs = []
+        seen_doc_keys: Set[str] = set()
+        for d in docs_all:
+            md = d.metadata or {}
+            k = (
+                f"{md.get('corpus_id', '')}:{md.get('doc_id', '')}:"
+                f"{md.get('title', '')}:{d.page_content[:80]}"
+            )
+            if k in seen_doc_keys:
+                continue
+            seen_doc_keys.add(k)
+            dedup_docs.append(d)
+            if len(dedup_docs) >= body.top_k:
+                break
+        answer_markdown, cites_raw = await knowledge_rag.answer_with_stuff(
+            query=rewrite_result.rewritten_query,
+            docs=dedup_docs,
+            answer_language=rewrite_result.language,
+        )
+        citations = [TutorCitation(**c) for c in cites_raw]
+        return TutorChatResponse(
+            reply_markdown=answer_markdown,
+            suggested_followups=[],
+            citations=citations,
+            query_type=rewrite_result.query_type,
+            rewritten_query=rewrite_result.rewritten_query,
+            rewrite_confidence=rewrite_result.confidence,
+        )
+
     user_prompt = build_tutor_chat_user(
         jd_text=jd_line,
         weak_topic=_resolve_weak_topic(sess, body.weak_topic),
