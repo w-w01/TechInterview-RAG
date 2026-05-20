@@ -2,17 +2,17 @@
 
 面向简历演示的**本地题库面试练习 MVP**：FastAPI + Next.js，出题支持 **真题（种子随机）** 与 **AI 生成题（结构化池少样本）**；评卷均为 **LLM rubric**。真题评卷锚定 **`question_id`**；AI 题锚定 **`generation_id`** 快照 + 抽样种子参考片段。**练习会话**：`POST /sessions`，出题可带 `session_id`；会话与试卷记录存本地 **SQLite**（题库仍为 JSON 种子）。
 
-**当前已实现**：`/generate-question`、`/generate-question-llm`、`/generate-paper-from-jd`（JD **向量检索候选** + **LLM Planner** 白名单 topic 优先级 + **LLM Selector** 仅从候选 id 选题并规划 AI 槽位）、`/evaluate-answer`（含 **`study_topics`** 建议学习方向）、`/sessions`、**AI Tutor**：`POST /sessions/{id}/tutor/learning-plan`（含 **`plan_days`** 与 JD **侧重点推断** `jd_priority_guess_markdown`）、`POST /sessions/{id}/tutor/chat`（一次性 JSON）、`POST /sessions/{id}/tutor/chat/stream`（**SSE** 流式正文，学习页默认走此接口）。Tutor 在启用知识库时已接入 **LangChain + FAISS + stuff 问答链**（`backend/data/knowledge/documents`），检索前 **LLM query 改写（含意图识别）**。**启动时**对全库种子与知识库文档分别建向量索引（需外网与 Key）。**评卷**仍为 **本题 canonical / AI 快照**，不把 JD 全文或检索邻居写入评卷 prompt。
+**当前已实现**：`/generate-question`、`/generate-question-llm`、`/generate-paper-from-jd`（JD **Hybrid 检索（向量+BM25）+ BGE Rerank 候选** + **LLM Planner** + **LLM Selector**）、`/evaluate-answer`（含 **`study_topics`**）、`/sessions`、**AI Tutor**（学习计划、`tutor/chat`、`tutor/chat/stream` SSE）。知识库路径：**query 改写** → **Hybrid + Rerank** → **LangChain FAISS + stuff 链**（`backend/data/knowledge/documents`）。两路检索共用 [`backend/app/retrieval_fusion.py`](backend/app/retrieval_fusion.py)。**启动时**对种子与知识库分别建索引（OpenAI Embedding；知识库 FAISS 可落盘）。**评卷**仍锚定 **本题 canonical / AI 快照**，不把检索片段写入评卷 prompt。检索栈细节见 [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md)「检索栈 v2」。
 
 **限流**：本仓库为**个人本地演示**，服务端**不实现** API 限流；若对外暴露请自行在网关或托管平台配置。
 
-**路线图**：[docs/ROADMAP.md](docs/ROADMAP.md)（阶段 3 规则自适应、阶段 4 AI Tutor、后续 LangChain 知识库 RAG 规划）。
+**路线图**：[docs/ROADMAP.md](docs/ROADMAP.md)（含阶段 5 知识库 RAG 与**检索栈 v2**）。
 
 ## 项目叙事（可写进简历）
 
-- **端到端**：前后端分离单页流程；真题 / AI 题 / **JD 向量组卷**；评卷为 LLM rubric，**不**把向量邻居并入评卷。
-- **选题**：topic 随机；结构化池 + LLM 新题；**JD** 为向量候选 + **双阶段 LLM**（规划 topic、从候选选题并定 AI 方向）。
-- **工程拆分**：`embedding_index`、`rag`、`prompts`、`session_store` / `generation_store`、`main`。
+- **端到端**：前后端分离单页流程；真题 / AI 题 / **JD Hybrid 组卷**；评卷为 LLM rubric，**不**把检索邻居并入评卷。
+- **选题**：topic 随机；结构化池 + LLM 新题；**JD** 为 Hybrid+Rerank 候选 + **双阶段 LLM**（规划 topic、从候选选题并定 AI 方向）。
+- **工程拆分**：`retrieval_fusion`、`embedding_index`、`knowledge_rag`、`rag`、`prompts`、`session_store` / `generation_store`、`main`。
 - **已落地 / 可扩展**：统一知识库（摄入 `POST /knowledge/documents`、调试 `POST /knowledge/search`、Tutor 引用式检索）与 **Tutor SSE**；**仍可扩展**：成体系 ETL、学习计划内嵌阅读材料、评卷后推荐阅读接口等。评卷主链路仍锚定 canonical / 快照，知识库不进入评卷 prompt。
 - **刻意不做**：账号体系、生产数据库、部署流水线（见 `docs/MVP_SCOPE.md`）。
 
@@ -31,15 +31,15 @@ python scripts\etl_kaggle_to_seed.py
 
 ## 技术栈
 
-- **后端**：FastAPI、Pydantic、OpenAI API（Chat：出题 + 评卷 + query 改写；**Embedding**：启动建索引 + JD 查询 + 知识库向量化）、numpy、LangChain、FAISS、本地 JSON 题库。
+- **后端**：FastAPI、Pydantic、OpenAI API（Chat / Embedding）、numpy、LangChain、FAISS、**rank-bm25**、**sentence-transformers**（本地 BGE Reranker）、本地 JSON 题库。
 - **前端**：Next.js（App Router）、React、TypeScript、Tailwind CSS、shadcn/ui；学习页 Tutor 助手气泡使用 **react-markdown**（GFM + `rehype-sanitize`）渲染 Markdown。
 
 ## 仓库结构
 
 ```
-backend/          FastAPI、data/（种子与白名单、Kaggle 源 JSON）、scripts/etl_kaggle_to_seed.py
+backend/          FastAPI、data/、scripts/（ETL、Doc2Query、健康度、检索评测）
 frontend/         Next.js 单页
-docs/             ROADMAP、MVP、题库与评卷设计、DATA_SCHEMA
+docs/             ROADMAP、MVP、RAG_DESIGN、DATA_SCHEMA
 ```
 
 ## 环境准备
@@ -74,7 +74,20 @@ cloudflared tunnel --url http://localhost:8000
 
 4. 在 n8n 中将 **HTTP Request** 等节点的 base URL 设为上述 `https://xxxx.trycloudflare.com`（即 `api_base_url`），路径例如 `POST /knowledge/documents`。文档写入目录：`backend/data/knowledge/documents/{corpus_id}/{doc_id}.json`；默认同路径已存在时返回 **409**，需加查询参数 `overwrite=true` 才覆盖。`corpus_id` 即子目录名，用于按知识库筛选；仓库 **Backend-Engineers-Guide** 的已摄入文档在 **`backend_engineers_guide`**，其它知识库请使用新的 `corpus_id`（同一 API 与目录规则）。
 
-- 健康检查：<http://127.0.0.1:8000/health>（`rag_index_ready`：题库非空；`embedding_index_ready`：种子向量索引已构建。）
+5. **知识库向量索引（FAISS）持久化**：首次或语料变更后会嵌入并写入 `backend/data/knowledge/faiss_index/`（`index.faiss`、`index.pkl`、`manifest.json`）。`manifest` 与语料指纹、嵌入模型、分块参数、`retrieval_stack_version` 等一致时**启动直接加载**。语料变更、Doc2Query 更新或 `MANIFEST_VERSION` 变更后需重建：设 `KNOWLEDGE_FAISS_REBUILD=true` 后重启。Hybrid / Rerank 开关见 `.env.example`（`HYBRID_ENABLED`、`RERANK_MODEL` 等）。
+
+6. **检索调优（可选离线脚本）**（在 `backend` 目录、已配置 `.env` 后）：
+
+```powershell
+# 为知识库 JSON 生成 synthetic_queries（会写回源文件，随后需重建 FAISS）
+python scripts\generate_doc2query.py
+# 知识库体检：重复 / topic 覆盖 / 一致性报告（只读，不改语料）
+python scripts\knowledge_health_check.py
+# 检索回归：对比 vector / hybrid / hybrid+rerank（需先补全 data/eval/*.jsonl 中的 expected_*）
+python scripts\eval_retrieval.py --suite all
+```
+
+- 健康检查：<http://127.0.0.1:8000/health>（`rag_index_ready`、`embedding_index_ready`、`knowledge_rag_*`、`hybrid_enabled`、`seed_bm25_ready`、`knowledge_bm25_ready`、`rerank_ready` 等。）
 - Topic 列表：<http://127.0.0.1:8000/topics>
 - 新建练习会话：`POST /sessions`
 - JD 混卷策略可通过 `backend/.env` 调参（见 `.env.example` 中 `JD_*` 变量，默认“真题优先”）。
@@ -143,7 +156,7 @@ Content-Type: application/json
 
 - **输入**：`jd_text` 过长时服务端截断（约 12k 字符）；`count` 为 1–20。
 - **输出**：`questions` 与 **`/generate-question`** 同形；选题评卷时 **`topics` 须传该题自带的标签**（与真题一致）。
-- **难度**：仅在对应难度子集中做 **余弦相似度** Top‑K（按 `id` 去重）。
+- **检索**：默认 **Hybrid（向量+BM25，α≈0.4）初筛** → **BGE Rerank** → Planner/Selector；`auto_adapt=true` 时跨三难度合并去重。开发态可返回 `meta.jd_retrieval_debug`（见 `JD_DEBUG_RETRIEVAL`）。
 
 **评估答案（真题：仅 `question_id`）**
 
@@ -206,9 +219,9 @@ Content-Type: application/json
 说明：
 - `locale_mode`：`auto / zh / en / mixed`，默认 `auto`。
 - `corpus_id`：可选，限定子库（如 `advanced_java`）；空字符串表示全库检索。
-- 索引构建时每个分块会带上 `Title: …` 前缀再嵌入，便于标题概括与正文一起被语义命中；**不按 `topic_slugs` 过滤**（该字段主要服务题库标签，知识库侧易不一致）。
-- 当前策略为**单知识库单次检索**（不做失败后二次跨语言重搜）；依赖多语 embedding 的跨语种语义对齐能力。
-- 响应中附带 `query_type`、`rewritten_query`、`retrieval_queries`、`retrieved_chunks`、`rewrite_confidence` 与 `citations`（知识库引用元信息）。
+- 分块嵌入文本含 `Title`、正文及可选 **`synthetic_queries`（Doc2Query）**；**不按 `topic_slugs` 过滤**。
+- 检索为 **Hybrid + Rerank**（与 JD 组卷共用 `retrieval_fusion`）；单次检索，不做失败后二次跨语言重搜。
+- 响应含 `query_type`、`rewritten_query`、`retrieval_queries`、`citations` 等；SSE `retrieval_hits` 含 `score` / `fusion_score` / `rerank_score`（分数越大越相关）。
 
 **Tutor 对话 — SSE 流式（与 `tutor/chat` 请求体相同，学习页默认使用）**
 
@@ -217,7 +230,7 @@ POST http://127.0.0.1:8000/sessions/{session_id}/tutor/chat/stream
 Content-Type: application/json
 ```
 
-响应：`text/event-stream`，每帧为 `data: <JSON>\n\n`，`JSON.type` 取值：`meta`（RAG 路径先发，含 `citations` 与改写元数据）、`delta`（`text` 为正文增量）、`done`（`suggested_followups`；RAG 路径当前多为空数组）、`error`（失败说明）。非 RAG 路径在正文流结束后另有一次轻量 JSON 调用生成 `suggested_followups`。
+响应：`text/event-stream`，每帧为 `data: <JSON>\n\n`，`JSON.type` 取值：`meta`（**仅 RAG 路径**：`citations`、改写字段、**`retrieval_hits`**（含 `score` / `fusion_score` / `rerank_score`、`retrieval_query` 等））、`delta`、`done`、`error`。学习页可展开「本轮检索详情」。
 
 知识库检索调试：
 
@@ -234,7 +247,7 @@ Content-Type: application/json
 
 - [docs/ROADMAP.md](docs/ROADMAP.md) — 分阶段目标（JD 组卷、自适应等）
 - [docs/MVP_SCOPE.md](docs/MVP_SCOPE.md) — 目标、范围、非目标、局限
-- [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md) — 数据加载、选题与评卷、JD RAG 组卷、知识库 Tutor 与 **流式输出（SSE）**；**多语言策略**见文内专节
+- [docs/RAG_DESIGN.md](docs/RAG_DESIGN.md) — 题库与评卷、**检索栈 v2（Hybrid+Rerank）**、知识库 Tutor、SSE、多语言；P2 延后项见文内
 - [docs/DATA_SCHEMA.md](docs/DATA_SCHEMA.md) — 题库 JSON 字段与白名单
 
 ## 截图

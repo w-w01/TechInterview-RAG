@@ -13,9 +13,10 @@
 - **练习会话**：`POST /sessions`；练习记录与薄弱点计数等写入本地 **SQLite**（`backend/data/session_store.sqlite3`），单机演示可持久化。**题库正文**仍以 **JSON 种子文件**为准，不设独立业务数据库。
 - 单页前端：选题、**真题 / AI 生成**、展示题目、填写答案、评估结果展示；顶栏 **答题 | 学习**，学习区为 **AI Tutor**（学习计划含 JD 侧重点推断、对话）与 **AI 小测**。
 
-### JD 向量组卷（已实现）
+### JD 组卷（已实现：Hybrid + Rerank）
 
-- 用户 **粘贴 JD 纯文本**；启动时对全库种子 **Embedding**；`POST /generate-paper-from-jd`：**向量检索候选** → **LLM Planner**（白名单 topic 优先级）→ **LLM Selector**（仅从候选 id 选题 + `ai_slots`）→ 程序校验与 AI 出题；整卷 **真题 + AI 穿插**。
+- 用户 **粘贴 JD 纯文本**；启动时对全库种子 **Embedding + BM25**；`POST /generate-paper-from-jd`：**Hybrid 初筛（向量+BM25）→ BGE Rerank** → **LLM Planner** → **LLM Selector** → 程序校验与 AI 出题；整卷 **真题 + AI 穿插**。
+- 可通过环境变量关闭 Hybrid/Rerank（回退纯向量）。**中文 JD Query2Doc**（改写为英文检索句）为 P2 延后项，见 [RAG_DESIGN.md](RAG_DESIGN.md)。
 - **评卷仍为 LLM rubric + 本题 canonical**，不把 JD 或检索邻居并入评卷 prompt。
 - **`GET /sessions/{id}/next-paper-plan`**：`topic_priority` 优先来自**上一张卷** `meta`（与当次 JD Planner 一致仅当该卷为 JD 组卷）；否则为**题库 stub + 弱点**近似排序，响应内 **`topic_priority_source` / `topic_priority_explanation`** 标明来源，避免与实时 Planner 混淆。
 
@@ -27,10 +28,11 @@
 
 ### LangChain 知识库 RAG（学习向：核心已纳入 MVP）
 
-- **已实现**：规范化文档摄入（`POST /knowledge/documents`）、启动时 FAISS 索引、**Tutor** 检索 + stuff 链（可选 `use_knowledge_rag`）、调试检索 `POST /knowledge/search`；与题库 seed 的 JD 组卷向量索引分离。
-- **仍属增强 / 未做全**：成体系 ETL 流水线、学习计划内嵌阅读、**评卷后推荐阅读** 独立接口、薄弱点复测命题等（不替代现有题库 seed）。
-- **评卷边界不变**：默认评卷仍只基于本题 canonical / AI generation snapshot；知识库检索结果不直接进入评分 prompt。
-- **多语言与流式**：见 [RAG_DESIGN.md](RAG_DESIGN.md)「多语言与答复语言控制」「流式输出」。
+- **已实现**：文档摄入（`POST /knowledge/documents`，可选 `synthetic_queries`）、FAISS 索引（可落盘）、**Tutor** 路径为 query 改写 → **Hybrid + Rerank** → stuff 链；`POST /knowledge/search` 调试；与 JD 组卷索引分离。检索实现见 `retrieval_fusion.py`，设计见 [RAG_DESIGN.md](RAG_DESIGN.md)「检索栈 v2」。
+- **离线脚本（可选）**：`scripts/generate_doc2query.py`（写回 JSON）、`scripts/knowledge_health_check.py`（只读报告）、`scripts/eval_retrieval.py`（golden 回归，需人工标注 `data/eval/*.jsonl`）。
+- **仍属增强 / 未做全**：成体系 ETL、学习计划内嵌阅读、评卷后推荐阅读接口、Local GraphRAG、按 `lang` 过滤检索等。
+- **评卷边界不变**：知识库不进入评卷 prompt。
+- **多语言与流式**：见 [RAG_DESIGN.md](RAG_DESIGN.md)。
 
 ## 非目标（刻意不做）
 
@@ -41,8 +43,8 @@
 
 ## 演示局限
 
-- 需要可用的 **OpenAI API Key**（启动 **Embedding** + 评卷 / 出题 Chat），无离线降级。
+- 需要可用的 **OpenAI API Key**（Embedding + Chat），无离线降级；**Rerank** 依赖本地 BGE 模型（首次检索加载，权重缓存在 Hugging Face 目录）。
 - 题库规模小，评分仅供演示，不代表真实面试评分标准。
-- JD 组卷为 **相对排序**（Top‑N），不设额外语义阈值时仍返回池中相对最相近的题目。
+- JD / Tutor 检索为 **相对排序**（Top‑K + Rerank），不设额外语义阈值。
 - CORS 仅放行本地前端常用端口，非生产安全配置。
 - **无限流**：未实现按 IP/Key 的配额或节流；对外部署需自行加固。

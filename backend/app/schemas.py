@@ -243,6 +243,8 @@ class KnowledgeSearchHit(BaseModel):
     """知识库检索命中项。"""
 
     score: Optional[float] = None
+    fusion_score: Optional[float] = None
+    rerank_score: Optional[float] = None
     source: str
     title: str
     corpus_id: str
@@ -319,6 +321,10 @@ class PaperBuildMeta(BaseModel):
         default_factory=list,
         description="程序对 Selector 输出做的校验与修正说明。",
     )
+    jd_retrieval_debug: Optional[dict[str, Any]] = Field(
+        None,
+        description="开发调试：JD Hybrid/Rerank 检索元数据。",
+    )
 
 
 class PaperQuestion(BaseModel):
@@ -352,6 +358,26 @@ class HealthResponse(BaseModel):
     knowledge_rag_chunks: int = Field(
         0,
         description="知识库 RAG 的分块数量。",
+    )
+    knowledge_rag_index_source: Optional[str] = Field(
+        None,
+        description="知识库索引来源：none / disk / rebuilt。",
+    )
+    hybrid_enabled: bool = Field(
+        True,
+        description="Hybrid 检索（向量+BM25）是否启用。",
+    )
+    seed_bm25_ready: bool = Field(
+        False,
+        description="题库种子 BM25 索引是否就绪。",
+    )
+    knowledge_bm25_ready: bool = Field(
+        False,
+        description="知识库 BM25 索引是否就绪。",
+    )
+    rerank_ready: bool = Field(
+        False,
+        description="BGE Rerank 模型是否已加载成功。",
     )
     seed_items: int
     message: Optional[str] = None
@@ -453,6 +479,10 @@ class KnowledgeDocumentIngestRequest(BaseModel):
     source: KnowledgeDocumentSource
     corpus_id: str
     topic_slugs: List[str] = Field(default_factory=list)
+    synthetic_queries: List[str] = Field(
+        default_factory=list,
+        description="可选；Doc2Query 预生成问题，写入 metadata 参与嵌入。",
+    )
     extra: KnowledgeDocumentExtra = Field(default_factory=KnowledgeDocumentExtra)
 
     @field_validator("corpus_id", "doc_id", mode="before")

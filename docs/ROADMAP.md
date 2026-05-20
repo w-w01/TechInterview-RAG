@@ -11,7 +11,7 @@
 
 ## 阶段 2（已收口）
 
-- **JD 纯文本组卷（已实现）**：启动 **Embedding** 全库种子；`POST /generate-paper-from-jd` 先做 **JD 向量检索候选**，再 **LLM Planner**（只输出白名单 `topic_priority`）→ **LLM Selector**（仅允许选择候选中的 `question_id`，并输出 `ai_slots`）→ 程序校验后 AI 出题与混卷；`meta` 含 `planner_notes`、`selector_notes`、`program_fixes` 等。
+- **JD 纯文本组卷（已实现）**：启动 **Embedding + BM25** 全库种子；`POST /generate-paper-from-jd` 为 **Hybrid 候选 → BGE Rerank → LLM Planner → LLM Selector** → 程序校验与混卷；`meta` 含 `planner_notes`、`selector_notes`、`program_fixes` 等（开发态可有 `jd_retrieval_debug`）。
 - **混卷（已实现）**：真题 + AI 穿插；AI 道数仍由「真题优先 + 短缺抬升」规则决定；Selector 在固定槽位内指定 AI 考查 `topics`/`difficulty`。
 - **会话留档（已实现）**：SQLite 持久化；session 下显式 `paper` 实体 + `attempt` 明细，记录题目来源、分数与薄弱点；薄弱点用于后续补弱组卷。
 - **重复控制（已实现）**：同一会话内已评估过题目默认不重复进入新卷；AI 题按题干规范化去重。
@@ -37,14 +37,16 @@
 
 - 评卷 JSON 含 **`study_topics`**，与 Tutor、学习区展示联动。
 
-## 阶段 5（LangChain 知识库 RAG：核心已落地，ETL/推荐阅读等可扩展）
+## 阶段 5（LangChain 知识库 RAG：核心已落地，检索栈 v2 已接入）
 
-目标：IT 面试“八股”**可追溯学习知识库**，与 JD 组卷用的 seed 向量索引分离；**不默认进入评卷 prompt**。
+目标：IT 面试“八股”**可追溯学习知识库**，与 JD 组卷索引分离；**不默认进入评卷 prompt**。
 
-- **知识库 ETL（可扩展）**：成体系原始资料目录与批量入库脚本、更强 metadata 等仍属增强项；当前可通过 `POST /knowledge/documents` 写入规范化 JSON。
-- **LangChain 分块与索引（已实现）**：`RecursiveCharacterTextSplitter` + OpenAI Embeddings + 本地 **FAISS**；启动构建，与 seed 索引分离。
-- **知识库检索 API（已实现）**：`POST /knowledge/search`（调试召回）；摄入见 `POST /knowledge/documents`。
-- **Tutor 引用式答疑（已实现）**：`/sessions/{id}/tutor/chat` 与 **`/tutor/chat/stream`** 在启用知识库时检索并注入上下文；响应 / `meta` 事件含 **citations**；前端可后续增加独立「参考来源」区块（当前以 API 字段为主）。
+- **检索栈 v2（已实现）**：JD 组卷与 Tutor 共用 **Hybrid（向量+BM25）+ 本地 BGE Rerank**（`retrieval_fusion.py`）；详见 [RAG_DESIGN.md](RAG_DESIGN.md)「检索栈 v2」。**P2 延后**：中文 JD Query2Doc、Local GraphRAG。
+- **知识库 ETL（可扩展）**：成体系批量入库仍属增强；当前 `POST /knowledge/documents` + 可选离线 **`generate_doc2query.py`**。
+- **分块与索引（已实现）**：`RecursiveCharacterTextSplitter` + OpenAI Embeddings + **FAISS**（manifest 含 `retrieval_stack_version` / `doc2query_version`）；启动可落盘加载。
+- **知识库检索 API（已实现）**：`POST /knowledge/search`（返回 fusion / rerank 分）。
+- **Tutor 引用式答疑（已实现）**：`/tutor/chat`、`/tutor/chat/stream`；SSE `retrieval_hits` 含检索分数字段；学习页可展开检索详情。
+- **离线运维（已实现脚本）**：`knowledge_health_check.py`（体检报告）、`eval_retrieval.py`（golden 回归，需补全 `data/eval/*.jsonl`）。
 - **评卷后推荐阅读**：基于 `/evaluate-answer` 的 `study_topics` / `weak_topics` 检索相关文章，规划独立推荐接口（例如 `POST /sessions/{id}/knowledge/recommend`），把“评卷结果”接到“下一步阅读”。
 - **学习计划资料绑定**：`/tutor/learning-plan` 在 JD 侧重点推断后检索高相关知识库片段，让每日任务附推荐阅读 / 复述任务 / 小测建议，减少纯 LLM 泛化计划。
 - **知识点掌握图谱（后续）**：将 topic 白名单、题库 seed、知识库 chunks 与用户弱点关联，形成 topic -> 子知识点 -> 文章 -> 相关题目的学习路径。

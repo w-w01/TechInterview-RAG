@@ -23,7 +23,8 @@ from .knowledge_documents import (
     relative_document_path,
     save_document_json,
 )
-from .knowledge_rag import KnowledgeRAGService
+from .knowledge_rag import KnowledgeRAGService, ScoredChunk
+from .retrieval_fusion import get_rerank_service, hybrid_enabled
 from .embedding_index import seed_embedding_index
 from .generation_store import GenerationSnapshot, get_snapshot, put_snapshot
 from .prompts import (
@@ -43,7 +44,7 @@ from .prompts import (
     build_tutor_learning_plan_user,
 )
 from .rag import RAGService, _item_topic_slugs
-from .query_rewrite import rewrite_query_with_llm
+from .query_rewrite import _normalize_text, rewrite_query_with_llm
 from .schemas import (
     CreateSessionResponse,
     EvaluateAnswerRequest,
@@ -133,6 +134,13 @@ JD_SHORTFALL_EXTRA_DIV = _env_int("JD_SHORTFALL_EXTRA_DIV", 2, min_v=1)
 JD_CANDIDATE_PER_TOPIC = _env_int("JD_CANDIDATE_PER_TOPIC", 12, min_v=4)
 JD_SELECTOR_MAX_ITEMS = _env_int("JD_SELECTOR_MAX_ITEMS", 96, min_v=20)
 KNOWLEDGE_RAG_TOP_K = _env_int("KNOWLEDGE_RAG_TOP_K", 6, min_v=1)
+KNOWLEDGE_INITIAL_K = _env_int("KNOWLEDGE_INITIAL_K", 30, min_v=5)
+JD_INITIAL_K = _env_int("JD_INITIAL_K", 30, min_v=5)
+JD_DEBUG_RETRIEVAL = str(os.getenv("JD_DEBUG_RETRIEVAL", "")).strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 QUERY_REWRITE_MODEL = os.getenv("QUERY_REWRITE_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
 
 _topic_entries: List[Dict[str, str]] = load_topic_allowlist()
@@ -151,6 +159,69 @@ def _get_openai() -> AsyncOpenAI:
     if _openai_client is None:
         _openai_client = AsyncOpenAI()
     return _openai_client
+
+
+def _rag_dedup_key(d: Any) -> str:
+    md = d.metadata or {}
+    return (
+        f"{md.get('corpus_id', '')}:{md.get('doc_id', '')}:"
+        f"{md.get('title', '')}:{d.page_content[:80]}"
+    )
+
+
+async def _tutor_retrieve_merged(
+    retrieval_queries: List[str],
+    *,
+    top_k: int,
+    corpus_id: Optional[str],
+) -> Tuple[List[Any], List[Dict[str, Any]]]:
+    """多 query Hybrid+Rerank 检索，按 chunk 去重保留最高分。"""
+    best_by_key: Dict[str, Tuple[ScoredChunk, str]] = {}
+    order_keys: List[str] = []
+    for q in retrieval_queries:
+        if not str(q).strip():
+            continue
+        rows = await knowledge_rag.retrieve_scored(
+            q.strip(),
+            top_k=top_k,
+            corpus_id=corpus_id,
+            initial_k=KNOWLEDGE_INITIAL_K,
+        )
+        for row in rows:
+            dk = _rag_dedup_key(row.document)
+            prev = best_by_key.get(dk)
+            if prev is None or row.score > prev[0].score:
+                best_by_key[dk] = (row, q)
+            if dk not in order_keys:
+                order_keys.append(dk)
+
+    order_keys.sort(key=lambda k: best_by_key[k][0].score, reverse=True)
+    order_keys = order_keys[:top_k]
+
+    dedup_docs: List[Any] = []
+    retrieval_hits: List[Dict[str, Any]] = []
+    for dk in order_keys:
+        row, rq = best_by_key[dk]
+        doc = row.document
+        dedup_docs.append(doc)
+        md = doc.metadata or {}
+        cid_hit = str(md.get("corpus_id") or "").strip()
+        did_hit = str(md.get("doc_id") or "").strip()
+        hit: Dict[str, Any] = {
+            "title": str(md.get("title") or did_hit),
+            "corpus_id": cid_hit,
+            "doc_id": did_hit,
+            "source": str(md.get("source_url") or f"knowledge:{cid_hit}/{did_hit}"),
+            "lang": str(md.get("lang") or ""),
+            "snippet": KnowledgeRAGService.hit_snippet(doc.page_content),
+            "score": row.score,
+            "fusion_score": row.fusion_score,
+            "retrieval_query": rq,
+        }
+        if row.rerank_score is not None:
+            hit["rerank_score"] = row.rerank_score
+        retrieval_hits.append(hit)
+    return dedup_docs, retrieval_hits
 
 
 def _normalize_request_topics(raw: List[str]) -> List[str]:
@@ -559,6 +630,11 @@ async def health() -> HealthResponse:
         embedding_index_ready=seed_embedding_index.ready,
         knowledge_rag_ready=knowledge_rag.ready,
         knowledge_rag_chunks=knowledge_rag.doc_count,
+        knowledge_rag_index_source=knowledge_rag.index_source,
+        hybrid_enabled=hybrid_enabled(),
+        seed_bm25_ready=seed_embedding_index.bm25_ready,
+        knowledge_bm25_ready=knowledge_rag.bm25_ready,
+        rerank_ready=get_rerank_service().ready,
         seed_items=len(_seed_items),
         message="InterviewMate RAG backend",
     )
@@ -570,15 +646,21 @@ async def knowledge_search(body: KnowledgeSearchRequest) -> KnowledgeSearchRespo
     if not knowledge_rag.ready:
         raise HTTPException(status_code=503, detail="Knowledge RAG 索引未就绪。")
     cid = str(body.corpus_id or "").strip() or None
-    docs = await knowledge_rag.retrieve(
-        body.query.strip(), top_k=body.top_k, corpus_id=cid
+    rows = await knowledge_rag.retrieve_scored(
+        body.query.strip(),
+        top_k=body.top_k,
+        corpus_id=cid,
+        initial_k=KNOWLEDGE_INITIAL_K,
     )
     hits: List[KnowledgeSearchHit] = []
-    for d in docs:
+    for row in rows:
+        d = row.document
         md = d.metadata or {}
         hits.append(
             KnowledgeSearchHit(
-                score=None,
+                score=row.score,
+                fusion_score=row.fusion_score,
+                rerank_score=row.rerank_score,
                 source=str(md.get("source_url") or ""),
                 title=str(md.get("title") or ""),
                 corpus_id=str(md.get("corpus_id") or ""),
@@ -1178,28 +1260,30 @@ async def generate_paper_from_jd(
     jd_raw = body.jd_text.strip()
     jd_trunc = jd_raw[:12000]
     qvec = await seed_embedding_index.embed_query(_get_openai(), jd_trunc)
-    # 检索候选池（后续按策略再挑选）：仅当 auto_adapt=false 时严格按请求难度，
-    # 否则首卷/自适应会跨难度做覆盖或调节。
+    # 检索候选池：Hybrid + Rerank（可 env 关闭）；auto_adapt 时跨三难度初筛。
     target_diffs = (
         [body.difficulty]
         if not body.auto_adapt
         else ["beginner", "intermediate", "advanced"]
     )
-    ranked_all: List[Dict[str, Any]] = []
-    for d in target_diffs:
-        ranked_d = seed_embedding_index.search_by_difficulty(
-            qvec, _seed_items, d, max(body.count * 4, body.count + 12)
-        )
-        ranked_all.extend(ranked_d)
-    # 保序去重
-    seen_rank: Set[str] = set()
-    ranked: List[Dict[str, Any]] = []
-    for it in ranked_all:
-        iid = str(it.get("id", "")).strip()
-        if not iid or iid in seen_rank:
-            continue
-        seen_rank.add(iid)
-        ranked.append(it)
+    ranked, jd_fusion_hits, jd_retrieval_mode = seed_embedding_index.search_jd_candidates(
+        qvec,
+        jd_trunc,
+        _seed_items,
+        target_diffs,
+        initial_k=JD_INITIAL_K,
+    )
+    jd_retrieval_debug: Optional[Dict[str, Any]] = None
+    if JD_DEBUG_RETRIEVAL or str(os.getenv("APP_ENV", "")).strip().lower() == "development":
+        jd_retrieval_debug = {
+            "retrieval_mode": jd_retrieval_mode,
+            "initial_candidate_count": len(jd_fusion_hits),
+            "rerank_top_ids": [
+                str(_seed_items[h.index].get("id", "")).strip()
+                for h in jd_fusion_hits[:15]
+                if 0 <= h.index < len(_seed_items)
+            ],
+        }
     if not ranked:
         raise HTTPException(
             status_code=404,
@@ -1238,10 +1322,20 @@ async def generate_paper_from_jd(
         ]
 
     if weak_topics:
-        ranked.sort(
-            key=lambda it: (_weak_score_for_item(it, weak_topics)),
-            reverse=True,
-        )
+        # Rerank 为主序，弱点加权为次键，避免完全推翻精排结果。
+        hit_by_id = {
+            str(_seed_items[h.index].get("id", "")).strip(): h
+            for h in jd_fusion_hits
+            if 0 <= h.index < len(_seed_items)
+        }
+
+        def _jd_rank_key(it: Dict[str, Any]) -> Tuple[float, float]:
+            iid = str(it.get("id", "")).strip()
+            h = hit_by_id.get(iid)
+            rr = h.rerank_score if h and h.rerank_score is not None else h.fusion_score if h else 0.0
+            return (float(rr), float(_weak_score_for_item(it, weak_topics)))
+
+        ranked.sort(key=_jd_rank_key, reverse=True)
 
     baseline_window = 3
     topic_baseline = (
@@ -1510,6 +1604,8 @@ async def generate_paper_from_jd(
             "selector_candidate_count": len(candidate_items),
             "program_fixes": list(program_fixes),
         }
+        if jd_retrieval_debug:
+            paper_meta["jd_retrieval_debug"] = jd_retrieval_debug
         paper_id = create_paper(
             sid,
             source="jd_rag_mix",
@@ -1521,28 +1617,31 @@ async def generate_paper_from_jd(
             at["paper_id"] = paper_id
             append_attempt(sid, at)
 
+    meta_kwargs: Dict[str, Any] = {
+        "seed_count": final_seed_count,
+        "ai_count": final_ai_count,
+        "ai_ratio": round(final_ai_count / max(1, len(mixed)), 4),
+        "ai_ratio_boosted": final_boosted,
+        "ai_ratio_reason": final_reason,
+        "seen_ratio_in_candidates": round(seen_ratio, 4),
+        "unseen_candidate_count": unseen_count,
+        "weak_topics_used": list(weak_topics),
+        "topic_priority": list(topic_priority),
+        "baseline_window": baseline_window,
+        "topic_level_plan": dict(recommended_by_topic),
+        "adjustment_reasons": list(adjustment_reasons),
+        "jd_plan_mode": "planner_selector",
+        "planner_notes": list(planner_notes),
+        "selector_notes": selector_notes,
+        "selector_candidate_count": len(candidate_items),
+        "program_fixes": list(program_fixes),
+    }
+    if jd_retrieval_debug:
+        meta_kwargs["jd_retrieval_debug"] = jd_retrieval_debug
     return GeneratePaperFromJdResponse(
         paper_id=paper_id,
         questions=mixed,
-        meta=PaperBuildMeta(
-            seed_count=final_seed_count,
-            ai_count=final_ai_count,
-            ai_ratio=round(final_ai_count / max(1, len(mixed)), 4),
-            ai_ratio_boosted=final_boosted,
-            ai_ratio_reason=final_reason,
-            seen_ratio_in_candidates=round(seen_ratio, 4),
-            unseen_candidate_count=unseen_count,
-            weak_topics_used=list(weak_topics),
-            topic_priority=list(topic_priority),
-            baseline_window=baseline_window,
-            topic_level_plan=dict(recommended_by_topic),
-            adjustment_reasons=list(adjustment_reasons),
-            jd_plan_mode="planner_selector",
-            planner_notes=list(planner_notes),
-            selector_notes=selector_notes,
-            selector_candidate_count=len(candidate_items),
-            program_fixes=list(program_fixes),
-        ),
+        meta=PaperBuildMeta(**meta_kwargs),
     )
 
 
@@ -1987,28 +2086,9 @@ async def tutor_chat(session_id: str, body: TutorChatRequest) -> TutorChatRespon
             if rewrite_result.query_type == "multi_intent" and rewrite_result.sub_queries
             else [rewrite_result.rewritten_query]
         )
-        docs_all = []
-        for q in retrieval_queries:
-            docs_all.extend(
-                await knowledge_rag.retrieve(
-                    q, top_k=top_k, corpus_id=rag_corpus
-                )
-            )
-        # 以 metadata + 内容片段去重，控制 stuff 上下文规模。
-        dedup_docs = []
-        seen_doc_keys: Set[str] = set()
-        for d in docs_all:
-            md = d.metadata or {}
-            k = (
-                f"{md.get('corpus_id', '')}:{md.get('doc_id', '')}:"
-                f"{md.get('title', '')}:{d.page_content[:80]}"
-            )
-            if k in seen_doc_keys:
-                continue
-            seen_doc_keys.add(k)
-            dedup_docs.append(d)
-            if len(dedup_docs) >= top_k:
-                break
+        dedup_docs, _ = await _tutor_retrieve_merged(
+            retrieval_queries, top_k=top_k, corpus_id=rag_corpus
+        )
         answer_markdown, cites_raw = await knowledge_rag.answer_with_stuff(
             query=rewrite_result.rewritten_query,
             docs=dedup_docs,
@@ -2074,28 +2154,13 @@ async def tutor_chat_stream(session_id: str, body: TutorChatRequest) -> Streamin
                     if rewrite_result.query_type == "multi_intent" and rewrite_result.sub_queries
                     else [rewrite_result.rewritten_query]
                 )
-                docs_all: List[Any] = []
-                for q in retrieval_queries:
-                    docs_all.extend(
-                        await knowledge_rag.retrieve(
-                            q, top_k=top_k, corpus_id=rag_corpus
-                        )
-                    )
-                dedup_docs: List[Any] = []
-                seen_doc_keys: Set[str] = set()
-                for d in docs_all:
-                    md = d.metadata or {}
-                    k = (
-                        f"{md.get('corpus_id', '')}:{md.get('doc_id', '')}:"
-                        f"{md.get('title', '')}:{d.page_content[:80]}"
-                    )
-                    if k in seen_doc_keys:
-                        continue
-                    seen_doc_keys.add(k)
-                    dedup_docs.append(d)
-                    if len(dedup_docs) >= top_k:
-                        break
+                dedup_docs, retrieval_hits = await _tutor_retrieve_merged(
+                    retrieval_queries, top_k=top_k, corpus_id=rag_corpus
+                )
                 cites_raw = KnowledgeRAGService._format_citations(dedup_docs)
+                orig_q = body.user_message.strip()
+                rw_q = rewrite_result.rewritten_query or ""
+                rewrite_changed = _normalize_text(orig_q) != _normalize_text(rw_q)
                 yield _sse_data(
                     {
                         "type": "meta",
@@ -2105,6 +2170,9 @@ async def tutor_chat_stream(session_id: str, body: TutorChatRequest) -> Streamin
                         "retrieval_queries": retrieval_queries,
                         "retrieved_chunks": len(dedup_docs),
                         "rewrite_confidence": rewrite_result.confidence,
+                        "original_query": orig_q,
+                        "rewrite_changed": rewrite_changed,
+                        "retrieval_hits": retrieval_hits,
                     }
                 )
                 if not dedup_docs:

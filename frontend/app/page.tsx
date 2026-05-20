@@ -102,6 +102,27 @@ type TutorPlanResponse = {
 
 type TutorTurn = { id: string; role: string; content: string };
 
+type TutorRagMeta = {
+  original_query: string;
+  rewritten_query: string;
+  query_type: string;
+  retrieval_queries: string[];
+  rewrite_changed: boolean;
+  rewrite_confidence: number | null;
+  retrieval_hits: {
+    title: string;
+    corpus_id: string;
+    doc_id: string;
+    source: string;
+    lang: string;
+    snippet: string;
+    score: number;
+    fusion_score?: number;
+    rerank_score?: number;
+    retrieval_query: string;
+  }[];
+};
+
 type QuestionDraftState = {
   answer: string;
   evaluation: EvaluateResponse | null;
@@ -143,6 +164,8 @@ export default function Home() {
   /** 首条 delta 前为 true，用于顶栏「正在回复」与占位，避免与流式气泡重复 */
   const [tutorStreamPriming, setTutorStreamPriming] = useState(false);
   const [tutorFollowups, setTutorFollowups] = useState<string[]>([]);
+  /** 本轮 Tutor（RAG）SSE meta：改写与召回命中，仅知识库路径有值 */
+  const [tutorRagMeta, setTutorRagMeta] = useState<TutorRagMeta | null>(null);
   const [learnQuizTopics, setLearnQuizTopics] = useState<string[]>([
     "general_programming",
   ]);
@@ -619,6 +642,7 @@ export default function Home() {
     setTutorLoading(true);
     setTutorStreamPriming(true);
     setTutorFollowups([]);
+    setTutorRagMeta(null);
     const userId = crypto.randomUUID();
     const assistantId = crypto.randomUUID();
     const historyPayload = tutorTurns.map((t) => ({
@@ -682,14 +706,48 @@ export default function Home() {
           const frame = buffer.slice(0, sep);
           buffer = buffer.slice(sep + 2);
           if (!frame.startsWith("data: ")) continue;
-          let payload: { type?: string; text?: string; message?: string; suggested_followups?: string[] };
+          let payload: {
+            type?: string;
+            text?: string;
+            message?: string;
+            suggested_followups?: string[];
+            original_query?: string;
+            rewritten_query?: string;
+            query_type?: string;
+            retrieval_queries?: string[];
+            rewrite_changed?: boolean;
+            rewrite_confidence?: number | null;
+            retrieval_hits?: TutorRagMeta["retrieval_hits"];
+          };
           try {
             payload = JSON.parse(frame.slice(6)) as typeof payload;
           } catch {
             continue;
           }
           const ev = payload.type;
-          if (ev === "delta" && typeof payload.text === "string") {
+          if (ev === "meta") {
+            if (
+              typeof payload.original_query === "string" &&
+              typeof payload.rewritten_query === "string" &&
+              typeof payload.query_type === "string" &&
+              Array.isArray(payload.retrieval_queries) &&
+              typeof payload.rewrite_changed === "boolean" &&
+              Array.isArray(payload.retrieval_hits)
+            ) {
+              setTutorRagMeta({
+                original_query: payload.original_query,
+                rewritten_query: payload.rewritten_query,
+                query_type: payload.query_type,
+                retrieval_queries: payload.retrieval_queries.map(String),
+                rewrite_changed: payload.rewrite_changed,
+                rewrite_confidence:
+                  typeof payload.rewrite_confidence === "number"
+                    ? payload.rewrite_confidence
+                    : null,
+                retrieval_hits: payload.retrieval_hits,
+              });
+            }
+          } else if (ev === "delta" && typeof payload.text === "string") {
             setTutorStreamPriming(false);
             setTutorTurns((prev) => {
               const next = [...prev];
@@ -1360,6 +1418,7 @@ export default function Home() {
                       setTutorTurns([]);
                       setTutorFollowups([]);
                       setTutorInput("");
+                      setTutorRagMeta(null);
                     }}
                   >
                     清空对话
@@ -1475,6 +1534,90 @@ export default function Home() {
                       ))}
                     </ul>
                   </div>
+                )}
+                {tutorRagMeta && (
+                  <details className="rounded-md border border-border bg-muted/30 text-xs">
+                    <summary className="cursor-pointer select-none px-3 py-2 font-medium text-muted-foreground">
+                      本轮检索详情（查询改写与向量召回）
+                    </summary>
+                    <div className="space-y-3 border-t border-border px-3 py-3 text-muted-foreground">
+                      <div>
+                        <p className="font-medium text-foreground">原始问题</p>
+                        <p className="mt-1 whitespace-pre-wrap leading-relaxed">
+                          {tutorRagMeta.original_query}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground">
+                          是否改写：{tutorRagMeta.rewrite_changed ? "是" : "否"}
+                          <span className="ml-2 font-normal">
+                            （类型 {tutorRagMeta.query_type}
+                            {tutorRagMeta.rewrite_confidence != null
+                              ? `，置信 ${tutorRagMeta.rewrite_confidence.toFixed(2)}`
+                              : ""}
+                            ）
+                          </span>
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap leading-relaxed">
+                          改写后检索主句：{tutorRagMeta.rewritten_query || "（空）"}
+                        </p>
+                        {tutorRagMeta.retrieval_queries.length > 1 && (
+                          <ul className="mt-2 list-disc pl-5">
+                            {tutorRagMeta.retrieval_queries.map((q) => (
+                              <li key={q} className="whitespace-pre-wrap">
+                                {q}
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground">
+                          召回片段（score 为 Rerank 或融合分，越大越相关）
+                        </p>
+                        <ul className="mt-2 space-y-2">
+                          {tutorRagMeta.retrieval_hits.map((h, i) => (
+                            <li
+                              key={`${h.corpus_id}-${h.doc_id}-${i}`}
+                              className="rounded border border-border/60 bg-background/50 p-2"
+                            >
+                              <p className="font-medium text-foreground">
+                                {i + 1}. {h.title}{" "}
+                                <span className="font-normal text-muted-foreground">
+                                  （score={h.score.toFixed(4)}
+                                  {h.rerank_score != null
+                                    ? `, rerank=${h.rerank_score.toFixed(4)}`
+                                    : ""}
+                                  {h.fusion_score != null
+                                    ? `, fusion=${h.fusion_score.toFixed(4)}`
+                                    : ""}
+                                  ）
+                                </span>
+                              </p>
+                              <p className="mt-0.5 text-[11px]">
+                                子查询：{h.retrieval_query}
+                              </p>
+                              {h.source ? (
+                                <p className="mt-0.5 truncate text-[11px]">
+                                  <a
+                                    href={h.source}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-primary underline underline-offset-2"
+                                  >
+                                    {h.source}
+                                  </a>
+                                </p>
+                              ) : null}
+                              <p className="mt-1 leading-relaxed text-muted-foreground">
+                                {h.snippet}
+                              </p>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </details>
                 )}
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <Textarea

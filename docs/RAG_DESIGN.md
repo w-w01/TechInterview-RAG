@@ -25,11 +25,11 @@
 3. 将标签、难度与样条拼入 prompt，LLM 输出 JSON：`question`、`expected_key_points`。
 4. 服务端登记 **`generation_id` 快照**（题干、要点、抽样 `source_seed_ids`）；评卷时 **仅认快照题干**，参考块由这些种子重载。
 
-### C. JD 文本 RAG 组卷（已实现：Planner + Selector）
+### C. JD 文本 RAG 组卷（已实现：Hybrid + Rerank + Planner + Selector）
 
-1. **索引构建（启动时）**：对每条种子将「Topics / Difficulty / Question / Reference answer / Key points」拼成文档文本（见 `embedding_index.doc_text_for_embedding`），批量调用 OpenAI **`text-embedding-3-small`**，向量 **L2 归一化** 后存入 **`numpy`** 矩阵（行与 `_seed_items` 下标对齐）。
+1. **索引构建（启动时）**：对每条种子拼文档文本（`embedding_index.doc_text_for_embedding`），OpenAI **`text-embedding-3-small`** 嵌入并 **L2 归一化** 存入 **`numpy`** 矩阵；同步建 **BM25** 索引（与行号对齐）。
 2. **组卷请求**：`POST /generate-paper-from-jd`，body 含 `jd_text`（最短约 40 字）、`difficulty`、`count`（1–20）、`auto_adapt`、`session_id`（可选）。
-3. **向量检索（候选池）**：JD 截断后嵌入；在难度子集上（`auto_adapt=true` 时为 beginner/intermediate/advanced 三路）做 **余弦 Top‑K**，合并 **按 `id` 去重** 得到与 JD 相关的有序候选列表。
+3. **检索（候选池）**：JD 截断后嵌入；按难度子集（`auto_adapt=true` 时三路）做 **Hybrid 初筛**（向量+BM25 融合，默认 `JD_INITIAL_K=30`）→ **BGE Rerank**（默认保留约 15 条）→ 跨难度 **按 `id` 去重**（保留更高分）。详见「检索栈 v2」；可用 `HYBRID_ENABLED` / `RERANK_ENABLED` 回退。
 4. **Planner（LLM）**：读取 JD 与 **topic 白名单**（`topic_allowlist.json`），只输出 JSON：`topic_priority`（合法 slug 数组，高→低）与 `notes`。若模型未给出合法 slug，则 **程序回退** 为「候选频次 + 会话弱点加权」排序（与旧规则一致，保证可组卷）。
 5. **候选送给 Selector**：按 Planner 的 topic 顺序从检索结果中 **分层抽样**（每 topic 条数上限、总条数上限见环境变量 `JD_CANDIDATE_PER_TOPIC`、`JD_SELECTOR_MAX_ITEMS`），每条含 `question_id`、题干、`topics`、难度、`key_points_preview`（缩短要点，省 token）。
 6. **Selector（LLM）**：在提示中注入 JD 摘要、topic 优先级、**真题道数 / AI 道数**、单 topic 真题上限、会话薄弱词、最近卷 **topic 推荐难度**（`topic_level_plan`），以及候选 JSON。**输出**仅允许使用候选中的 `question_id`；并输出 `ai_slots`（每道含 `topics` + `difficulty`），供后续 AI 出题。
@@ -99,14 +99,32 @@
 ### 与现有链路的关系
 
 - **评卷主链路**：仍只使用本题 **canonical / `generation_id` 快照**；多语言控制 **不默认** 把知识库检索结果写入评卷 prompt（与下文 Knowledge RAG 边界一致）。  
-- **JD 组卷**：仍为向量检索英文 seed + Planner/Selector；用户 JD 可为中文，无需为「纯英文知识库」而删中文资料。  
+- **JD 组卷**：Hybrid+Rerank 检索英文 seed + Planner/Selector；用户 JD 可为中文（跨语言靠 BM25/多语 embedding，Query2Doc 为 P2）。  
 - **数据文件编码**：原始资料与 API 交换统一 **UTF-8**（见 [DATA_SCHEMA.md](DATA_SCHEMA.md) 题库约定）。
+
+## 检索栈 v2（已实现：Hybrid + Rerank）
+
+两系统（JD 组卷 seed、知识库 Tutor）共用 `backend/app/retrieval_fusion.py`：
+
+1. **Hybrid**：向量分（余弦 / FAISS L2 转相似度）与 **BM25** 按 `score = (1-α)*vector + α*bm25` 融合，默认 **α=0.4**（`HYBRID_ALPHA`）。中文查询 BM25 使用字符二字 gram + 英文技术 token，不依赖 jieba。
+2. **初筛规模**：默认 `RETRIEVE_INITIAL_K=30`；JD 组卷再 **BGE Rerank** 至 `JD_RERANK_TOP_N=15` 后进入 Planner/Selector。
+3. **Rerank**：本地 `BAAI/bge-reranker-base`（`sentence-transformers` CrossEncoder），懒加载；`RERANK_ENABLED=false` 或加载失败时降级为仅 Hybrid/向量。
+4. **知识库 corpus 过滤**：向量与 BM25 均在子库 eligible 索引上检索后融合，避免「先全库向量再后过滤」漏召回。
+5. **Doc2Query**：文档 JSON 可选 `synthetic_queries`；嵌入时拼接 `Q: ...`（见 `generate_doc2query.py`）。manifest 含 `doc2query_version`、`retrieval_stack_version`。
+6. **调试**：`POST /knowledge/search` 与 Tutor SSE `retrieval_hits` 含 `fusion_score` / `rerank_score`；JD 组卷在 `JD_DEBUG_RETRIEVAL=true` 或 `APP_ENV=development` 时返回 `meta.jd_retrieval_debug`。
+7. **回归评测**：`backend/scripts/eval_retrieval.py` + `backend/data/eval/*.jsonl`。
+
+环境变量见 `backend/.env.example`（`HYBRID_ENABLED`、`RERANK_MODEL` 等）。
+
+### P2 延后：中文 JD Query2Doc
+
+将中文 JD 改写为「英文理想题面 / 关键词列表」再检索英文 seed，以缓解跨语言向量空间对齐不足。**当前未实现**；跨语言场景暂依赖 Hybrid BM25 与多语 embedding。
 
 ## 后续可改进方向
 
-- JD 经 LLM 压缩为查询向量或与关键词检索混合。
+- Local GraphRAG（实体邻域对比问答）。
 - 题目在检索约束下的生成并做安全过滤。
-- 评估指标与人工标注对齐。
+- 扩大 golden 集与人工标注对齐。
 - “已答过”集合当前按 `score != null` 定义，可扩展为“已展开/已作答未评估”亦计入，避免用户中断后重复。
 
 ## LangChain 知识库 RAG 规划
@@ -118,8 +136,8 @@
 `/sessions/{session_id}/tutor/chat` 已接入统一知识库检索问答链路，核心如下：
 
 1. **索引对象**：`backend/data/knowledge/documents/**.json`（不拆中英文库）。
-2. **分块**：`RecursiveCharacterTextSplitter` 按标题/段落优先切分；**每个分块在嵌入前拼接 `Title: {title}` 与正文**，使标题概括与查询语义对齐（非单独关键词倒排，仍是向量检索）。
-3. **向量库**：OpenAI `text-embedding-3-small` + 本地 `FAISS`（进程启动构建）。
+2. **分块**：`RecursiveCharacterTextSplitter` 按标题/段落优先切分；嵌入文本含 `Title`、正文及可选 **`synthetic_queries`（Doc2Query）**。
+3. **向量库**：OpenAI `text-embedding-3-small` + 本地 `FAISS`；检索为 **Hybrid + BGE Rerank**（见「检索栈 v2」）。
 4. **问答链**：LangChain `create_stuff_documents_chain`（stuff）。
 5. **查询前处理**：全 LLM `query rewrite`（意图识别 + 改写），支持：
    - `context_dependent`
