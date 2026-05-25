@@ -102,7 +102,16 @@ npm install
 npm run dev
 ```
 
-浏览器打开：<http://localhost:3000>
+浏览器打开：<http://localhost:3000>（默认跳转 `/zh`；英文 UI 为 `/en`）。
+
+**InterviewMate 前端路由（双语，浅色品牌 UI）**
+
+| 路径 | 说明 |
+|------|------|
+| `/zh` 或 `/en` | Landing 首页 |
+| `/[locale]/session` | 模拟面试：卡片 Deck、仅前进、后台并行评卷、总结礼花 |
+| `/[locale]/learn` | 学习计划 + Tutor（SSE 透传 `locale_mode`） |
+| `/[locale]/session?demo=1` | 预填演示 JD |
 
 ## 示例 API
 
